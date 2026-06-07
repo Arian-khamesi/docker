@@ -1,0 +1,38 @@
+services:
+  next_cms:
+    image: node:20-alpine
+    container_name: jpa_next_cms
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "30010:3000"
+    volumes:
+      - ./:/app
+      - next_cms_node_modules:/app/node_modules
+      - next_cms_cache:/app/.next
+    environment:
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      NEXT_PUBLIC_API_URL: ""
+
+    command: >
+     sh -lc "
+        npm config --global set registry https://mirror.abrha.net/repository/npm/ &&
+        if [ ! -f /app/package.json ]; then
+          echo 'Creating fresh Next.js CMS project...';
+          rm -rf /tmp/jpa-next-cms;
+          npx --yes create-next-app@latest /tmp/jpa-next-cms --tailwind --eslint --app --src-dir --import-alias '@/*' --use-npm --yes --disable-git;
+          cp -a /tmp/jpa-next-cms/. /app/;
+          cd /app;
+          npm install clsx tailwind-merge lucide-react;
+        fi;
+        cd /app;
+        npm install;
+        npm run dev -- --hostname 0.0.0.0
+      "
+
+volumes:
+  next_cms_node_modules:
+  next_cms_cache:
