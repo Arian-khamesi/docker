@@ -68,9 +68,9 @@ export const NAV_ITEMS: NavItem[] = [
         permission: "content.view",
       },
       {
-        id: "content-pages",
-        title: "صفحات",
-        href: "/dashboard/content/pages",
+        id: "content-mainSLider",
+        title: "مدیریت اسلایدر",
+        href: "/dashboard/content/slider-management",
         permission: "content.view",
       },
       {

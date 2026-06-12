@@ -33,7 +33,7 @@ export function MenuItemDrawer() {
   };
 
   const currentMenu = activeTab === "desktop" ? desktopMenu : mobileMenu;
-  
+
   const item = useMemo(() => {
     if (!selectedItemId) return null;
     return findItemById(currentMenu, selectedItemId);
@@ -50,7 +50,7 @@ export function MenuItemDrawer() {
   // تابع افزودن زیرمنو جدید
   const handleAddChild = () => {
     if (!isRootItem) return; // لایه‌ی حفاظتی
-    
+
     const newChild: MenuItem = {
       id: nanoid(),
       title: "زیرمنوی جدید",
@@ -68,11 +68,11 @@ export function MenuItemDrawer() {
   return (
     <Drawer open={!!selectedItemId} onClose={close} title="تنظیمات و مدیریت زیرمنو">
       <div className="space-y-6 pb-20">
-        
+
         {/* بخش اول: ویرایش اطلاعات اصلی آیتم */}
         <div className="space-y-4 bg-muted/30 p-4 rounded-[--radius] border border-border">
           <h3 className="text-xs font-black text-primary">اطلاعات اصلی آیتم</h3>
-          
+
           <div className="space-y-1">
             <label className="text-[11px] font-bold text-muted-foreground">عنوان آیتم</label>
             <input
@@ -95,49 +95,28 @@ export function MenuItemDrawer() {
         </div>
 
         {/* بخش دوم: تصاویر (مخصوص دسکتاپ) */}
-       {/* بخش دوم: تصاویر (مخصوص دسکتاپ) */}
-{item.type === "desktop" && isRootItem && (
-  <div className="grid grid-cols-2 gap-4">
-     <ImageUploader
-        label="تصویر مردانه"
-        value={(item as any).imageSet?.menImage}
-        onChange={(url) =>
-          updateMenuItem(
-            item.id,
-            {
-              imageSet: {
-                ...((item as any).imageSet || {}),
-                menImage: url,
-              },
-            } as any
-          )
-        }
-     />
+        {/* بخش دوم: تصاویر (مخصوص دسکتاپ) */}
+        {item.type === "desktop" && isRootItem && (
+          <div className="grid grid-cols-2 gap-4">
+            <ImageUploader
+              label="آپلود تصویر منو"
+              value={item.image}
+              onChange={(url) =>
+                updateMenuItem(item.id, {
+                  image: url,
+                })
+              }
+            />
 
-     <ImageUploader
-        label="تصویر زنانه"
-        value={(item as any).imageSet?.womenImage}
-        onChange={(url) =>
-          updateMenuItem(
-            item.id,
-            {
-              imageSet: {
-                ...((item as any).imageSet || {}),
-                womenImage: url,
-              },
-            } as any
-          )
-        }
-     />
-  </div>
-)}
+          </div>
+        )}
 
         {/* بخش سوم: مدیریت زیرمنوها (محدود به ۲ لایه) */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-black text-foreground">لیست زیرمنوها</h3>
             {isRootItem && (
-              <button 
+              <button
                 onClick={handleAddChild}
                 className="text-[10px] bg-primary/10 text-primary px-3 py-1 rounded-full font-bold hover:bg-primary hover:text-black transition-all"
               >
@@ -158,34 +137,34 @@ export function MenuItemDrawer() {
             {item.children && item.children.length > 0 ? (
               item.children.map((child, index) => (
                 <div key={child.id} className="flex items-center gap-2 p-2 bg-card border border-border rounded-[--radius] group">
-                   <div className="text-muted-foreground text-xs font-mono w-4">{index + 1}</div>
-                   <input 
-                      className="flex-1 bg-transparent text-xs font-bold outline-none focus:text-primary"
-                      value={child.title}
-                      onChange={(e) => {
-                        const newChildren = [...item.children!];
-                        newChildren[index].title = e.target.value;
-                        updateMenuItem(item.id, { children: newChildren });
-                      }}
-                   />
-                   <input 
-                      className="flex-1 bg-transparent text-[10px] ltr text-muted-foreground outline-none focus:text-primary"
-                      value={child.slug}
-                      onChange={(e) => {
-                        const newChildren = [...item.children!];
-                        newChildren[index].slug = e.target.value;
-                        updateMenuItem(item.id, { children: newChildren });
-                      }}
-                   />
-                   <button 
-                      onClick={() => {
-                        const newChildren = item.children!.filter(c => c.id !== child.id);
-                        updateMenuItem(item.id, { children: newChildren });
-                      }}
-                      className="opacity-0 group-hover:opacity-100 text-destructive text-[10px] font-bold transition-all"
-                   >
-                      حذف
-                   </button>
+                  <div className="text-muted-foreground text-xs font-mono w-4">{index + 1}</div>
+                  <input
+                    className="flex-1 bg-transparent text-xs font-bold outline-none focus:text-primary"
+                    value={child.title}
+                    onChange={(e) => {
+                      const newChildren = [...item.children!];
+                      newChildren[index].title = e.target.value;
+                      updateMenuItem(item.id, { children: newChildren });
+                    }}
+                  />
+                  <input
+                    className="flex-1 bg-transparent text-[10px] ltr text-muted-foreground outline-none focus:text-primary"
+                    value={child.slug}
+                    onChange={(e) => {
+                      const newChildren = [...item.children!];
+                      newChildren[index].slug = e.target.value;
+                      updateMenuItem(item.id, { children: newChildren });
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      const newChildren = item.children!.filter(c => c.id !== child.id);
+                      updateMenuItem(item.id, { children: newChildren });
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-destructive text-[10px] font-bold transition-all"
+                  >
+                    حذف
+                  </button>
                 </div>
               ))
             ) : isRootItem ? (
@@ -198,23 +177,23 @@ export function MenuItemDrawer() {
 
         {/* بخش پایانی: عملیات‌های خطرناک */}
         <div className="pt-6 border-t border-border flex items-center justify-between">
-            <button 
-              onClick={() => {
-                if(confirm("آیا از حذف کامل این منو و تمام زیرمنوهایش مطمئن هستید؟")) {
-                  deleteMenuItem(item.id);
-                  close();
-                }
-              }}
-              className="text-[11px] text-destructive font-bold hover:underline"
-            >
-              حذف کل این آیتم
-            </button>
-            <button 
-              onClick={close}
-              className="bg-primary text-primary-foreground px-6 py-2 rounded-[--radius] text-xs font-bold shadow-md shadow-primary/20"
-            >
-              تایید و ذخیره
-            </button>
+          <button
+            onClick={() => {
+              if (confirm("آیا از حذف کامل این منو و تمام زیرمنوهایش مطمئن هستید؟")) {
+                deleteMenuItem(item.id);
+                close();
+              }
+            }}
+            className="text-[11px] text-destructive font-bold hover:underline"
+          >
+            حذف کل این آیتم
+          </button>
+          <button
+            onClick={close}
+            className="bg-primary text-primary-foreground px-6 py-2 rounded-[--radius] text-xs font-bold shadow-md shadow-primary/20"
+          >
+            تایید و ذخیره
+          </button>
         </div>
       </div>
     </Drawer>

@@ -46,20 +46,41 @@ export interface MenuState {
   // آیتم انتخاب شده برای Drawer
   selectedItemId: string | null;
 
-  // آیا ترتیب‌ها تغییر کرده‌اند و هنوز ذخیره نشده‌اند؟
-  hasPendingOrderChanges: boolean;
+hasPendingOrderChanges: boolean;
+
+pendingRootOrders: boolean;
+
+pendingChildOrders: boolean;
+  
 
   // Actions
   setActiveTab: (tab: MenuType) => void;
   setSelectedItemId: (id: string | null) => void;
 
-  setPendingOrderChanges: (value: boolean) => void;
+setPendingOrderChanges: (
+  value: boolean
+) => void;
+
+setPendingRootOrders: (
+  value: boolean
+) => void;
+
+setPendingChildOrders: (
+  value: boolean
+) => void;
+  
 
   addMenuItem: (parentId: string | null, type: MenuType) => void;
   updateMenuItem: (
     id: string,
     updates: Partial<MenuItem>
   ) => void;
+
+  reorderChildItems: (
+  type: MenuType,
+  parentId: string,
+  orderedIds: string[]
+) => void;
 
   deleteMenuItem: (id: string) => void;
 

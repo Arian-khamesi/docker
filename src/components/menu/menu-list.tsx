@@ -1,7 +1,10 @@
 "use client";
 
 import { useMenuStore } from "@/store/menu.store";
-import { MenuItem } from "@/types/menu";
+import {
+  MenuItem,
+  MenuType,
+} from "@/types/menu";
 import {
   DndContext,
   closestCenter,
@@ -17,28 +20,70 @@ import {
 } from "@dnd-kit/sortable";
 import { SortableItem } from "./sortable-item";
 
-// --- کامپوننت مدیریت درگ زیرمنوها (سطح دوم) ---
-function SubmenuList({ parentId, children }: { parentId: string; children: MenuItem[] }) {
-  const { updateMenuItem } = useMenuStore();
+// ----------------------
+// Submenu List
+// ----------------------
 
-  const handleSubmenuDragEnd = (event: DragEndEvent) => {
+function SubmenuList({
+  parentId,
+  children,
+  menuType,
+}: {
+  parentId: string;
+  children: MenuItem[];
+  menuType: MenuType;
+}){
+  const {
+    reorderChildItems,
+  } = useMenuStore();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
+
+  const handleSubmenuDragEnd = (
+    event: DragEndEvent
+  ) => {
     const { active, over } = event;
+
     if (!over || active.id === over.id) return;
 
-    const oldIndex = children.findIndex((i) => i.id === active.id);
-    const newIndex = children.findIndex((i) => i.id === over.id);
-    
-    // جابجایی در آرایه محلی فرزندان
-    const newChildren = arrayMove(children, oldIndex, newIndex);
+    const oldIndex = children.findIndex(
+      (item) => item.id === active.id
+    );
 
-    // به‌روزرسانی آیتم والد در استور با لیست فرزندان مرتب شده جدید
-    updateMenuItem(parentId, { children: newChildren });
-  };
+    const newIndex = children.findIndex(
+      (item) => item.id === over.id
+    );
+
+    if (oldIndex === -1 || newIndex === -1) return;
+
+   const reorderedChildren = arrayMove(
+  children,
+  oldIndex,
+  newIndex
+);
+
+reorderChildItems(
+  menuType,
+  parentId,
+  reorderedChildren.map(
+    (child) => child.id
+  )
+);}
 
   return (
-    <DndContext collisionDetection={closestCenter} onDragEnd={handleSubmenuDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleSubmenuDragEnd}
+    >
       <SortableContext
-        items={children.map((c) => c.id)}
+        items={children.map((child) => child.id)}
         strategy={verticalListSortingStrategy}
       >
         <div className="mr-8 pr-4 border-r-2 border-dashed border-muted-foreground/20 space-y-2 mb-4 mt-1">
@@ -46,7 +91,7 @@ function SubmenuList({ parentId, children }: { parentId: string; children: MenuI
             <SortableItem
               key={child.id}
               id={child.id}
-              isChild={true} // نمایش با استایل زیرمنو
+              isChild
               itemData={{
                 title: child.title,
                 slug: child.slug,
@@ -61,34 +106,57 @@ function SubmenuList({ parentId, children }: { parentId: string; children: MenuI
   );
 }
 
-// --- کامپوننت اصلی لیست منوها ---
+// ----------------------
+// Main Menu List
+// ----------------------
+
 export function MenuList() {
-  const { activeTab, desktopMenu, mobileMenu, reorderRootItems } = useMenuStore();
+  const {
+    activeTab,
+    desktopMenu,
+    mobileMenu,
+    reorderRootItems,
+  } = useMenuStore();
 
-  // انتخاب لیست بر اساس تب فعال
-  const items = activeTab === "desktop" ? desktopMenu : mobileMenu;
+  const items =
+    activeTab === "desktop"
+      ? desktopMenu
+      : mobileMenu;
 
-  // سنسورها برای بهبود تجربه لمسی و کلیک (اختیاری)
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8, // جلوگیری از درگ ناخواسته هنگام کلیک ساده
+        distance: 8,
       },
     })
   );
 
-  const handleMainDragEnd = (event: DragEndEvent) => {
+  const handleMainDragEnd = (
+    event: DragEndEvent
+  ) => {
     const { active, over } = event;
+
     if (!over || active.id === over.id) return;
 
-    const oldIndex = items.findIndex((i) => i.id === active.id);
-    const newIndex = items.findIndex((i) => i.id === over.id);
-    const newItems = arrayMove(items, oldIndex, newIndex);
+    const oldIndex = items.findIndex(
+      (item) => item.id === active.id
+    );
 
-    // ذخیره ترتیب جدید در سطح ریشه (Root)
+    const newIndex = items.findIndex(
+      (item) => item.id === over.id
+    );
+
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reorderedItems = arrayMove(
+      items,
+      oldIndex,
+      newIndex
+    );
+
     reorderRootItems(
       activeTab,
-      newItems.map((i) => i.id)
+      reorderedItems.map((item) => item.id)
     );
   };
 
@@ -101,19 +169,21 @@ export function MenuList() {
   }
 
   return (
-    <DndContext 
+    <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter} 
+      collisionDetection={closestCenter}
       onDragEnd={handleMainDragEnd}
     >
       <SortableContext
-        items={items.map((i) => i.id)}
+        items={items.map((item) => item.id)}
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-1 mt-4">
           {items.map((item) => (
-            <div key={item.id} className="flex flex-col">
-              {/* آیتم اصلی (سطح ۱) */}
+            <div
+              key={item.id}
+              className="flex flex-col"
+            >
               <SortableItem
                 id={item.id}
                 itemData={{
@@ -121,14 +191,18 @@ export function MenuList() {
                   slug: item.slug,
                   isActive: item.isActive,
                   color: item.color,
-                    image: item.image,
+                  image: item.image,
                 }}
               />
 
-              {/* رندر زیرمنوها (سطح ۲) با قابلیت درگ داخلی */}
-              {item.children && item.children.length > 0 && (
-                <SubmenuList parentId={item.id} children={item.children} />
-              )}
+              {item.children &&
+                item.children.length > 0 && (
+                  <SubmenuList
+                    parentId={item.id}
+                    children={item.children}
+                     menuType={activeTab}
+                  />
+                )}
             </div>
           ))}
         </div>

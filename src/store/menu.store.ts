@@ -12,7 +12,6 @@ function createEmptyItem(type: MenuType): MenuItem {
 
     color: "#d93747",
 
-    // تصویر آیتم سطح اول
     image: "",
 
     children: [],
@@ -28,13 +27,11 @@ function createEmptyItem(type: MenuType): MenuItem {
   return {
     ...base,
     type: "mobile",
-
-    // برای توسعه‌های بعدی
     icon: "menu",
   } as MenuItem;
 }
 
-export const useMenuStore = create<MenuState>((set, get) => ({
+export const useMenuStore = create<MenuState>((set) => ({
   activeTab: "desktop",
 
   desktopMenu: [],
@@ -42,24 +39,58 @@ export const useMenuStore = create<MenuState>((set, get) => ({
 
   selectedItemId: null,
 
-  // تغییرات ذخیره نشده ترتیب
+  // Pending Changes
   hasPendingOrderChanges: false,
+  pendingRootOrders: false,
+  pendingChildOrders: false,
 
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  // ----------------------
+  // Basic Actions
+  // ----------------------
 
-  setSelectedItemId: (id) => set({ selectedItemId: id }),
+  setActiveTab: (tab) =>
+    set({
+      activeTab: tab,
+    }),
+
+  setSelectedItemId: (id) =>
+    set({
+      selectedItemId: id,
+    }),
 
   setPendingOrderChanges: (value) =>
-    set({ hasPendingOrderChanges: value }),
+    set({
+      hasPendingOrderChanges: value,
+    }),
+
+  setPendingRootOrders: (value) =>
+    set({
+      pendingRootOrders: value,
+    }),
+
+  setPendingChildOrders: (value) =>
+    set({
+      pendingChildOrders: value,
+    }),
+
+  // ----------------------
+  // Add Item
+  // ----------------------
 
   addMenuItem: (parentId, type) =>
     set((state) => {
       const newItem = createEmptyItem(type);
-      const listKey = type === "desktop" ? "desktopMenu" : "mobileMenu";
+
+      const listKey =
+        type === "desktop"
+          ? "desktopMenu"
+          : "mobileMenu";
+
       const list = [...state[listKey]];
 
       if (!parentId) {
         newItem.order = list.length;
+
         list.push(newItem);
 
         return {
@@ -68,10 +99,14 @@ export const useMenuStore = create<MenuState>((set, get) => ({
         } as Partial<MenuState>;
       }
 
-      const addToTree = (items: MenuItem[]): MenuItem[] =>
+      const addToTree = (
+        items: MenuItem[]
+      ): MenuItem[] =>
         items.map((item) => {
           if (item.id === parentId) {
-            const children = item.children ? [...item.children] : [];
+            const children = [
+              ...(item.children || []),
+            ];
 
             newItem.order = children.length;
 
@@ -83,10 +118,15 @@ export const useMenuStore = create<MenuState>((set, get) => ({
             };
           }
 
-          if (item.children && item.children.length > 0) {
+          if (
+            item.children &&
+            item.children.length > 0
+          ) {
             return {
               ...item,
-              children: addToTree(item.children),
+              children: addToTree(
+                item.children
+              ),
             };
           }
 
@@ -99,9 +139,15 @@ export const useMenuStore = create<MenuState>((set, get) => ({
       } as Partial<MenuState>;
     }),
 
+  // ----------------------
+  // Update Item
+  // ----------------------
+
   updateMenuItem: (id, updates) =>
     set((state) => {
-      const updateTree = (items: MenuItem[]): MenuItem[] =>
+      const updateTree = (
+        items: MenuItem[]
+      ): MenuItem[] =>
         items.map((item) => {
           if (item.id === id) {
             return {
@@ -110,10 +156,15 @@ export const useMenuStore = create<MenuState>((set, get) => ({
             };
           }
 
-          if (item.children && item.children.length > 0) {
+          if (
+            item.children &&
+            item.children.length > 0
+          ) {
             return {
               ...item,
-              children: updateTree(item.children),
+              children: updateTree(
+                item.children
+              ),
             };
           }
 
@@ -121,28 +172,48 @@ export const useMenuStore = create<MenuState>((set, get) => ({
         });
 
       return {
-        desktopMenu: updateTree(state.desktopMenu),
-        mobileMenu: updateTree(state.mobileMenu),
+        desktopMenu: updateTree(
+          state.desktopMenu
+        ),
+        mobileMenu: updateTree(
+          state.mobileMenu
+        ),
       };
     }),
 
+  // ----------------------
+  // Delete Item
+  // ----------------------
+
   deleteMenuItem: (id) =>
     set((state) => {
-      const removeFromTree = (items: MenuItem[]): MenuItem[] =>
+      const removeFromTree = (
+        items: MenuItem[]
+      ): MenuItem[] =>
         items
-          .filter((item) => item.id !== id)
+          .filter(
+            (item) => item.id !== id
+          )
           .map((item) =>
-            item.children && item.children.length > 0
+            item.children &&
+            item.children.length > 0
               ? {
                   ...item,
-                  children: removeFromTree(item.children),
+                  children:
+                    removeFromTree(
+                      item.children
+                    ),
                 }
               : item
           );
 
       return {
-        desktopMenu: removeFromTree(state.desktopMenu),
-        mobileMenu: removeFromTree(state.mobileMenu),
+        desktopMenu: removeFromTree(
+          state.desktopMenu
+        ),
+        mobileMenu: removeFromTree(
+          state.mobileMenu
+        ),
         selectedItemId:
           state.selectedItemId === id
             ? null
@@ -150,7 +221,14 @@ export const useMenuStore = create<MenuState>((set, get) => ({
       };
     }),
 
-  reorderRootItems: (type, orderedIds) =>
+  // ----------------------
+  // Reorder Root Items
+  // ----------------------
+
+  reorderRootItems: (
+    type,
+    orderedIds
+  ) =>
     set((state) => {
       const listKey =
         type === "desktop"
@@ -160,27 +238,36 @@ export const useMenuStore = create<MenuState>((set, get) => ({
       const list = [...state[listKey]];
 
       const idToItem = new Map(
-        list.map((item) => [item.id, item])
+        list.map((item) => [
+          item.id,
+          item,
+        ])
       );
 
       const reordered: MenuItem[] = [];
 
-      orderedIds.forEach((id, index) => {
-        const item = idToItem.get(id);
+      orderedIds.forEach(
+        (id, index) => {
+          const item =
+            idToItem.get(id);
 
-        if (item) {
-          reordered.push({
-            ...item,
-            order: index,
-          });
+          if (item) {
+            reordered.push({
+              ...item,
+              order: index,
+            });
+          }
         }
-      });
+      );
 
       list.forEach((item) => {
-        if (!orderedIds.includes(item.id)) {
+        if (
+          !orderedIds.includes(item.id)
+        ) {
           reordered.push({
             ...item,
-            order: reordered.length,
+            order:
+              reordered.length,
           });
         }
       });
@@ -188,8 +275,112 @@ export const useMenuStore = create<MenuState>((set, get) => ({
       return {
         [listKey]: reordered,
 
-        // کاربر ترتیب را تغییر داده اما هنوز ذخیره نکرده
         hasPendingOrderChanges: true,
+        pendingRootOrders: true,
+      } as Partial<MenuState>;
+    }),
+
+  // ----------------------
+  // Reorder Child Items
+  // ----------------------
+
+  reorderChildItems: (
+    type,
+    parentId,
+    orderedIds
+  ) =>
+    set((state) => {
+      const listKey =
+        type === "desktop"
+          ? "desktopMenu"
+          : "mobileMenu";
+
+      const reorderChildren = (
+        items: MenuItem[]
+      ): MenuItem[] =>
+        items.map((item) => {
+          if (item.id === parentId) {
+            const children = [
+              ...(item.children || []),
+            ];
+
+            const childMap =
+              new Map(
+                children.map(
+                  (child) => [
+                    child.id,
+                    child,
+                  ]
+                )
+              );
+
+            const reorderedChildren: MenuItem[] =
+              [];
+
+            orderedIds.forEach(
+              (id, index) => {
+                const child =
+                  childMap.get(id);
+
+                if (child) {
+                  reorderedChildren.push(
+                    {
+                      ...child,
+                      order: index,
+                    }
+                  );
+                }
+              }
+            );
+
+            children.forEach(
+              (child) => {
+                if (
+                  !orderedIds.includes(
+                    child.id
+                  )
+                ) {
+                  reorderedChildren.push(
+                    {
+                      ...child,
+                      order:
+                        reorderedChildren.length,
+                    }
+                  );
+                }
+              }
+            );
+
+            return {
+              ...item,
+              children:
+                reorderedChildren,
+            };
+          }
+
+          if (
+            item.children &&
+            item.children.length > 0
+          ) {
+            return {
+              ...item,
+              children:
+                reorderChildren(
+                  item.children
+                ),
+            };
+          }
+
+          return item;
+        });
+
+      return {
+        [listKey]: reorderChildren(
+          state[listKey]
+        ),
+
+        hasPendingOrderChanges: true,
+        pendingChildOrders: true,
       } as Partial<MenuState>;
     }),
 }));
