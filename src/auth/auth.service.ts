@@ -1,34 +1,153 @@
-import { mockUsers } from "./auth.mock"
+import type { User } from "./auth.types";
 
-export async function login(username: string, password: string) {
-  await new Promise((r) => setTimeout(r, 800)) // شبیه‌سازی تاخیر API
+import { ENDPOINTS } from "@/lib/api/endpoints";
+import { ApiError } from "@/lib/api/api-error";
+import {
+  type ApiEnvelope,
+  unwrapApiData,
+} from "@/lib/api/api-response";
+import {
+  httpClient,
+  setApiTokenResolver,
+} from "@/lib/api/http-client";
 
-  // پیدا کردن کاربر
-  const user = mockUsers.find(
-    (u) => u.username === username && u.password === password
-  )
+const TOKEN_KEY = "jpa_cms_token";
+const USER_KEY = "jpa_cms_user";
 
-  // اگر پیدا نشد، خطا بده
-  if (!user) {
-    throw new Error("نام کاربری یا رمز عبور اشتباه است.")
-  }
+export type LoginCredentials = {
+  username: string;
+  password: string;
+};
 
-  // اگر پیدا شد، کاربر را ذخیره کن
-  localStorage.setItem("user", JSON.stringify(user))
-  return user
+interface LoginResponseData {
+  token: string;
+  user: User;
 }
 
-export async function getSession() {
-  await new Promise((r) => setTimeout(r, 400)) // شبیه‌سازی تاخیر API
+interface SessionResponseData {
+  user: User;
+}
 
-  const stored = localStorage.getItem("user")
-  if (!stored) return null
+setApiTokenResolver(getToken);
 
-  return JSON.parse(stored)
+export async function login(
+  username: string,
+  password: string
+): Promise<User> {
+  const response = await httpClient.post<
+    ApiEnvelope<LoginResponseData>,
+    LoginCredentials
+  >(ENDPOINTS.auth.login, {
+    username,
+    password,
+  });
+
+  const data = unwrapApiData(response, "ورود با خطا مواجه شد.");
+
+  if (!data.token || !data.user) {
+    throw new ApiError({
+      status: 500,
+      code: "INVALID_LOGIN_RESPONSE",
+      message: "پاسخ ورود از سمت سرور معتبر نیست.",
+      payload: response,
+    });
+  }
+
+  saveAuthSession(data.token, data.user);
+
+  return data.user;
+}
+
+export async function loginWithCredentials(
+  credentials: LoginCredentials
+): Promise<User> {
+  return login(credentials.username, credentials.password);
+}
+
+export async function getSession(): Promise<User | null> {
+  const token = getToken();
+
+  if (!token) return null;
+
+  try {
+    const response = await httpClient.get<ApiEnvelope<SessionResponseData>>(
+      ENDPOINTS.auth.me,
+      {
+        auth: true,
+      }
+    );
+
+    const data = unwrapApiData(response, "دریافت اطلاعات کاربر با خطا مواجه شد.");
+
+    if (!data.user) {
+      clearAuthSession();
+      return null;
+    }
+
+    saveStoredUser(data.user);
+
+    return data.user;
+  } catch {
+    clearAuthSession();
+    return null;
+  }
 }
 
 export async function logout() {
-  await new Promise((r) => setTimeout(r, 200)) // شبیه‌سازی تاخیر API
+  try {
+    const token = getToken();
 
-  localStorage.removeItem("user")
+    if (token) {
+      await httpClient.post<ApiEnvelope<unknown>>(
+        ENDPOINTS.auth.logout,
+        undefined,
+        {
+          auth: true,
+        }
+      );
+    }
+  } finally {
+    clearAuthSession();
+  }
+}
+
+export function getToken() {
+  if (typeof window === "undefined") return null;
+
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+export function getStoredUser(): User | null {
+  if (typeof window === "undefined") return null;
+
+  const storedUser = window.localStorage.getItem(USER_KEY);
+
+  if (!storedUser) return null;
+
+  try {
+    return JSON.parse(storedUser) as User;
+  } catch {
+    window.localStorage.removeItem(USER_KEY);
+    return null;
+  }
+}
+
+export function clearAuthSession() {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(USER_KEY);
+}
+
+function saveAuthSession(token: string, user: User) {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.setItem(TOKEN_KEY, token);
+  saveStoredUser(user);
+}
+
+function saveStoredUser(user: User) {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
 }

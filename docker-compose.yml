@@ -15,7 +15,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
-      NEXT_PUBLIC_API_URL: ""
+      NEXT_PUBLIC_API_URL: "http://45.138.135.241:8091/api/v1"
 
     command: >
      sh -lc "

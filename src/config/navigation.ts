@@ -1,38 +1,49 @@
 // src/config/navigation.ts
-import {
-  LayoutDashboard,
-  FileText,
-  Package,
-  ShoppingCart,
-  BarChart3,
-  Users,
-  Settings,
-  ShieldCheck,
-  Layers,
-  Megaphone,
-  Workflow,
-  LineChart,
-} from "lucide-react"
 
-import { Permission } from "@/auth/auth.types"
+import {
+  BarChart3,
+  FileText,
+  Layers,
+  LayoutDashboard,
+  LineChart,
+  Megaphone,
+  Package,
+  Settings,
+  ShoppingCart,
+  Users,
+  Workflow,
+  ReceiptText,
+  RotateCcw,
+  BadgeDollarSign,
+  PlusCircle,
+  Repeat2,
+  ShoppingBag,
+  Smartphone,
+  UserCog,
+  type LucideIcon,
+} from "lucide-react";
+
+import { Permission } from "@/auth/auth.types";
+import { ROUTES } from "@/config/routes";
 
 export interface NavItem {
-  id: string
-  title: string
-  icon?: any
-  href?: string
-  permission?: Permission
-  children?: NavItem[]
+  id: string;
+  title: string;
+  icon?: LucideIcon;
+  href?: string;
+  permission?: Permission;
+  children?: NavItem[];
 }
 
 /**
- * ✅ SINGLE SOURCE OF TRUTH
- * - Sidebar rendering
- * - Route permission
- * - Menu hierarchy
+ * ساختار اصلی منوی داشبورد
+ *
+ * نکته مهم:
+ * - routeها از ROUTES می‌آیند.
+ * - permissionها فعلاً همین‌جا برای نمایش منو استفاده می‌شوند.
+ * - در فاز بعدی permission routeها را هم با همین ساختار هماهنگ می‌کنیم.
  */
 export const NAV_ITEMS: NavItem[] = [
-  // 1️⃣ داشبورد
   {
     id: "dashboard",
     title: "داشبورد",
@@ -42,47 +53,63 @@ export const NAV_ITEMS: NavItem[] = [
       {
         id: "dashboard-home",
         title: "نمای کلی",
-        href: "/dashboard",
+        href: ROUTES.dashboard.home,
         permission: "dashboard.view",
       },
       {
         id: "dashboard-reports",
         title: "گزارشات",
-        href: "/dashboard/reports",
+        href: ROUTES.dashboard.reports,
         permission: "reports.view",
       },
     ],
   },
 
-  // 2️⃣ محتوا و سایت
   {
     id: "content",
     title: "محتوا و سایت",
     icon: FileText,
     permission: "content.view",
     children: [
-       {
-        id: "content-pages",
-        title: "مدیریت منو ها",
-        href: "/dashboard/content/menu-management",
+      {
+        id: "content-menu-management",
+        title: "مدیریت منوها",
+        href: ROUTES.content.menuManagement,
         permission: "content.view",
       },
       {
-        id: "content-mainSLider",
+        id: "content-slider-management",
         title: "مدیریت اسلایدر",
-        href: "/dashboard/content/slider-management",
+        href: ROUTES.content.sliderManagement,
+        permission: "content.view",
+      },
+      {
+        id: "content-homepage-highlights",
+        title: "هایلایت‌های صفحه اصلی",
+        href: ROUTES.content.homepageHighlights,
+        permission: "content.view",
+      },
+      {
+        id: "content-product-carousels",
+        title: "کروسل‌های محصولات",
+        href: ROUTES.content.productCarousels,
+        permission: "content.view",
+      },
+      {
+        id: "content-category-carousels",
+        title: "کروسل‌های دسته‌بندی",
+        href: ROUTES.content.categoryCarousels,
         permission: "content.view",
       },
       {
         id: "content-blog",
         title: "بلاگ",
-        href: "/dashboard/content/blog",
+        href: ROUTES.content.blog,
         permission: "content.manage",
       },
     ],
   },
 
-  // 3️⃣ محصولات
   {
     id: "products",
     title: "محصولات",
@@ -92,25 +119,24 @@ export const NAV_ITEMS: NavItem[] = [
       {
         id: "products-list",
         title: "همه محصولات",
-        href: "/dashboard/products",
+        href: ROUTES.products.list,
         permission: "products.view",
       },
       {
         id: "products-categories",
         title: "دسته‌بندی‌ها",
-        href: "/dashboard/products/categories",
+        href: ROUTES.products.categories,
         permission: "products.manage",
       },
       {
         id: "products-new",
         title: "ایجاد محصول",
-        href: "/dashboard/products/new",
+        href: ROUTES.products.new,
         permission: "products.create",
       },
     ],
   },
 
-  // 4️⃣ CRM
   {
     id: "crm",
     title: "CRM",
@@ -120,41 +146,75 @@ export const NAV_ITEMS: NavItem[] = [
       {
         id: "crm-customers",
         title: "مشتریان",
-        href: "/dashboard/crm/customers",
+        href: ROUTES.crm.customers,
         permission: "crm.view",
       },
       {
         id: "crm-tickets",
         title: "تیکت‌ها",
-        href: "/dashboard/crm/tickets",
+        href: ROUTES.crm.tickets,
         permission: "crm.manage",
       },
     ],
   },
 
-  // 5️⃣ سفارشات و فروش
-  {
-    id: "orders",
-    title: "سفارشات و فروش",
-    icon: ShoppingCart,
-    permission: "orders.view",
-    children: [
-      {
-        id: "orders-list",
-        title: "سفارشات",
-        href: "/dashboard/orders",
-        permission: "orders.view",
-      },
-      {
-        id: "orders-returns",
-        title: "بازگشت‌ها",
-        href: "/dashboard/orders/returns",
-        permission: "orders.manage",
-      },
-    ],
-  },
+ {
+  id: "orders",
+  title: "سفارشات و فروش",
+  icon: ShoppingBag,
+  children: [
+    {
+      id: "orders-list",
+      title: "همه سفارشات",
+      href: ROUTES.orders.list,
+      icon: ReceiptText,
+      permission: "content.view",
+    },
+    {
+      id: "orders-new",
+      title: "ثبت سفارش دستی",
+      href: ROUTES.orders.new,
+      icon: PlusCircle,
+      permission: "content.view",
+    },
+    {
+      id: "orders-returns",
+      title: "مرجوعی‌ها",
+      href: ROUTES.orders.returns,
+      icon: RotateCcw,
+      permission: "content.view",
+    },
+    {
+      id: "orders-exchanges",
+      title: "تعویض‌ها",
+      href: ROUTES.orders.exchanges,
+      icon: Repeat2,
+      permission: "content.view",
+    },
+    {
+      id: "orders-snapp",
+      title: "سفارش‌های اسنپ",
+      href: ROUTES.orders.snapp,
+      icon: Smartphone,
+      permission: "content.view",
+    },
+    {
+      id: "orders-manual",
+      title: "سفارش‌های دستی",
+      href: ROUTES.orders.manual,
+      icon: UserCog,
+      permission: "content.view",
+    },
+    {
+      id: "orders-kiyan-sale",
+      title: "ثبت در کیان",
+      href: ROUTES.orders.kiyanSale,
+      icon: BadgeDollarSign,
+      permission: "content.view",
+    },
+  ],
+},
 
-  // 6️⃣ انبار
   {
     id: "inventory",
     title: "انبار",
@@ -164,64 +224,58 @@ export const NAV_ITEMS: NavItem[] = [
       {
         id: "inventory-stock",
         title: "موجودی",
-        href: "/dashboard/inventory",
+        href: ROUTES.inventory.stock,
         permission: "inventory.view",
       },
       {
         id: "inventory-movements",
         title: "گردش انبار",
-        href: "/dashboard/inventory/movements",
+        href: ROUTES.inventory.movements,
         permission: "inventory.manage",
       },
     ],
   },
 
-  // 7️⃣ کانال‌های فروش
   {
     id: "sales-channels",
     title: "کانال‌های فروش",
     icon: Megaphone,
-    href: "/dashboard/sales-channels",
+    href: ROUTES.salesChannels.list,
     permission: "sales_channels.view",
   },
 
-  // 8️⃣ کمپین و پیام‌رسانی
   {
     id: "campaigns",
     title: "کمپین و پیام‌رسانی",
     icon: Megaphone,
-    href: "/dashboard/campaigns",
+    href: ROUTES.campaigns.list,
     permission: "campaigns.view",
   },
 
-  // 9️⃣ گزارش و سلامت سیستم
   {
     id: "system-reports",
     title: "گزارش و سلامت سیستم",
     icon: BarChart3,
-    href: "/dashboard/system-reports",
+    href: ROUTES.systemReports.list,
     permission: "reports.view",
   },
 
-  // 🔟 آنالیتیکس
   {
     id: "analytics",
     title: "آنالیتیکس",
     icon: LineChart,
-    href: "/dashboard/analytics",
+    href: ROUTES.analytics.list,
     permission: "analytics.view",
   },
 
-  // 1️⃣1️⃣ درخواست‌ها و گردش کار
   {
     id: "workflows",
     title: "درخواست‌ها و گردش کار",
     icon: Workflow,
-    href: "/dashboard/workflows",
+    href: ROUTES.workflows.list,
     permission: "workflows.view",
   },
 
-  // 1️⃣2️⃣ تنظیمات و امنیت
   {
     id: "settings",
     title: "تنظیمات",
@@ -231,15 +285,15 @@ export const NAV_ITEMS: NavItem[] = [
       {
         id: "settings-general",
         title: "تنظیمات عمومی",
-        href: "/dashboard/settings",
+        href: ROUTES.settings.general,
         permission: "settings.manage",
       },
       {
         id: "settings-security",
         title: "امنیت",
-        href: "/dashboard/settings/security",
+        href: ROUTES.settings.security,
         permission: "security.manage",
       },
     ],
   },
-]
+];

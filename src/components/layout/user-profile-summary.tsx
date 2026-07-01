@@ -1,17 +1,28 @@
-"use client"
+"use client";
 
-import { useState, useRef, useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { cn } from "@/lib/utils"
-import { useAuthStore } from "@/auth/auth.store"   // ← این بخش تو پروژه تو هست یا بعدا میسازیم
-import { LogOut, Settings, User, ListTodo, Sparkles } from "lucide-react"
+import { useEffect, useRef, useState } from "react";
+import type { ElementType } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ListTodo,
+  LogOut,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  User,
+} from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/auth/auth.store";
 
 interface UserProfileSummaryProps {
-  name: string
-  role: string
-  team?: string
-  avatarUrl?: string
-  className?: string
+  name: string;
+  role: string;
+  team?: string;
+  avatarUrl?: string;
+  className?: string;
 }
 
 export function UserProfileSummary({
@@ -21,129 +32,277 @@ export function UserProfileSummary({
   avatarUrl,
   className,
 }: UserProfileSummaryProps) {
-  const router = useRouter()
-  const logout = useAuthStore((s) => s.logout)  // ← اتصال به سیستم لاگ اوت واقعی
+  const router = useRouter();
+  const logout = useAuthStore((state) => state.logout);
 
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
-  // بستن dropdown با کلیک خارج
   useEffect(() => {
-    const handle = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
+    const handlePointerDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
       }
-    }
-    document.addEventListener("mousedown", handle)
-    return () => document.removeEventListener("mousedown", handle)
-  }, [])
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  const navigateTo = (href: string) => {
+    setOpen(false);
+    router.push(href);
+  };
 
   return (
-    <div ref={ref} className="relative">
-      {/* Trigger */}
-      <div
+    <div ref={ref} className={cn("relative", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
         className={cn(
-          "flex cursor-pointer items-center gap-3 rounded-md px-2 py-1 transition hover:bg-muted",
-          className
+          "group flex items-center gap-3 rounded-2xl bg-background/35 px-2.5 py-2 backdrop-blur-xl transition-all duration-200",
+          "shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.14)]",
+          "hover:-translate-y-0.5 hover:bg-muted/55 hover:shadow-[0_14px_34px_hsl(var(--glass-shadow)/0.10),inset_0_1px_0_hsl(var(--glass-border)/0.18)]",
+          open && "bg-primary/10 shadow-[0_14px_34px_hsl(var(--primary)/0.10),inset_0_1px_0_hsl(var(--glass-border)/0.18)]"
         )}
-        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        {/* Avatar */}
-        <div className="relative">
-          <div className="h-10 w-10 overflow-hidden rounded-full border border-border bg-muted">
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={name}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                {name}
-              </div>
-            )}
+        <Avatar name={name} avatarUrl={avatarUrl} />
+
+        <div className="hidden min-w-0 flex-col items-start gap-0.5 md:flex">
+          <div className="max-w-32 truncate text-sm font-black leading-tight text-foreground">
+            {name}
           </div>
 
-          {/* status dot */}
-          <span className="absolute -bottom-0.5 -left-0.5 h-2.5 w-2.5 rounded-full border border-background bg-emerald-500" />
-        </div>
-
-        {/* text */}
-        <div className="hidden flex-col gap-0.5 md:flex">
-          <div className="flex items-center gap-1 text-sm font-semibold leading-tight">
-            <span className="text-foreground">{name}</span>
-          </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="max-w-40 truncate text-xs text-muted-foreground">
             {role}
             {team ? ` • ${team}` : null}
           </div>
         </div>
-      </div>
 
-      {/* Dropdown menu */}
+        <ChevronDown
+          className={cn(
+            "hidden h-4 w-4 text-muted-foreground transition-transform md:block",
+            open && "rotate-180 text-primary"
+          )}
+        />
+      </button>
+
       {open && (
-        <div
-          className="absolute left-0 z-50 mt-2 w-56 rounded-xl border border-border bg-popover shadow-lg transition-all bg-red-50"
-        >
-          {/* header */}
-          <div className="flex flex-col gap-1 px-4 py-3 border-b border-border">
-            <span className="text-sm font-semibold">{name}</span>
-            <span className="text-xs text-muted-foreground">{role}</span>
+        <div className="absolute left-0 top-full z-[9999] mt-3 w-[21rem] overflow-hidden rounded-[2.25rem] bg-card/82 p-2.5 text-foreground shadow-[0_32px_100px_hsl(var(--glass-shadow)/0.26),inset_0_1px_0_hsl(var(--glass-border)/0.18),inset_0_-1px_0_hsl(var(--glass-border)/0.08)] backdrop-blur-[30px]">
+          <div className="pointer-events-none absolute -left-16 -top-16 h-48 w-48 rounded-full bg-primary/16 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-10 right-0 h-40 w-40 rounded-full bg-info/10 blur-3xl" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-background/20" />
+
+          <div className="relative overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-primary/14 via-background/38 to-background/16 p-4 shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.16)]">
+            <div className="pointer-events-none absolute -left-10 -top-10 h-28 w-28 rounded-full bg-primary/18 blur-2xl" />
+
+            <div className="relative flex items-center gap-3">
+              <Avatar name={name} avatarUrl={avatarUrl} large />
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-black text-foreground">
+                  {name}
+                </p>
+
+                <p className="mt-1 truncate text-xs text-muted-foreground">
+                  {role}
+                  {team ? ` • ${team}` : null}
+                </p>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1 text-[11px] font-bold text-success shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.12)]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                    آنلاین
+                  </span>
+
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.12)]">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    امن
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* items */}
-          <ul className="flex flex-col py-1">
+          <div className="relative mt-2 grid gap-1.5">
+            <ProfileMenuItem
+              icon={User}
+              label="مشاهده نمایه"
+              description="اطلاعات حساب کاربری"
+              onClick={() => navigateTo("/profile")}
+            />
 
-            <li
-              onClick={() => router.push("/profile")}
-              className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
-            >
-              <User className="h-4 w-4" />
-              مشاهده نمایه
-            </li>
+            <ProfileMenuItem
+              icon={ListTodo}
+              label="وظایف من"
+              description="پیگیری کارهای در انتظار"
+              onClick={() => navigateTo("/tasks")}
+            />
 
-            <li
-              onClick={() => router.push("/tasks")}
-              className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
-            >
-              <ListTodo className="h-4 w-4" />
-              وظایف من
-            </li>
+            <ProfileMenuItem
+              icon={Settings}
+              label="تنظیمات حساب"
+              description="امنیت، رمز عبور و تنظیمات شخصی"
+              onClick={() => navigateTo("/account/settings")}
+            />
 
-            <li
-              onClick={() => router.push("/account/settings")}
-              className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
-            >
-              <Settings className="h-4 w-4" />
-              تنظیمات حساب
-            </li>
+            <ProfileMenuItem
+              icon={Sparkles}
+              label="طرح ارتقا"
+              description="مدیریت امکانات و سطح دسترسی"
+              onClick={() => navigateTo("/pricing")}
+              featured
+            />
+          </div>
 
-            <li
-              onClick={() => router.push("/pricing")}
-              className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
-            >
-              <Sparkles className="h-4 w-4" />
-              طرح ارتقا
-            </li>
+          <div className="relative my-2 h-px bg-gradient-to-l from-transparent via-foreground/10 to-transparent" />
 
-            {/* divider */}
-            <div className="my-1 h-px bg-border"></div>
+          <button
+            type="button"
+            onClick={async () => {
+              setOpen(false);
+              await logout();
+              router.replace("/login");
+            }}
+            className="relative flex w-full items-center justify-between overflow-hidden rounded-[1.5rem] bg-destructive/10 px-3 py-3 text-sm font-black text-destructive shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.10)] transition-all hover:bg-destructive/15"
+          >
+            <span className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-destructive/10 shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.10)]">
+                <LogOut className="h-4 w-4" />
+              </span>
 
-            <li
-              onClick={async () => {
-                await logout()        // ← پاک شدن session سمت سرور + پاک state
-                router.replace("/login")
-              }}
-              className="flex cursor-pointer items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-            >
-              <LogOut className="h-4 w-4" />
               از سیستم خارج شوید
-            </li>
+            </span>
 
-          </ul>
+            <ChevronLeft className="h-4 w-4" />
+          </button>
         </div>
       )}
     </div>
-  )
+  );
 }
 
+function Avatar({
+  name,
+  avatarUrl,
+  large = false,
+}: {
+  name: string;
+  avatarUrl?: string;
+  large?: boolean;
+}) {
+  const initials = getInitials(name);
+
+  return (
+    <div className="relative shrink-0">
+      <div
+        className={cn(
+          "overflow-hidden rounded-2xl bg-muted shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.16),0_10px_24px_hsl(var(--glass-shadow)/0.08)]",
+          large ? "h-14 w-14" : "h-10 w-10"
+        )}
+      >
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={name}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-primary/10 text-xs font-black text-primary">
+            {initials}
+          </div>
+        )}
+      </div>
+
+      <span
+        className={cn(
+          "absolute -bottom-0.5 -left-0.5 rounded-full bg-success shadow-[0_0_0_3px_hsl(var(--background)/0.70)]",
+          large ? "h-3.5 w-3.5" : "h-3 w-3"
+        )}
+      />
+    </div>
+  );
+}
+
+function ProfileMenuItem({
+  icon: Icon,
+  label,
+  description,
+  onClick,
+  featured = false,
+}: {
+  icon: ElementType;
+  label: string;
+  description: string;
+  onClick: () => void;
+  featured?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group relative flex w-full items-center justify-between overflow-hidden rounded-[1.5rem] px-3 py-3 text-right transition-all duration-200",
+        "shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.10)]",
+        "hover:-translate-y-0.5 hover:shadow-[0_14px_34px_hsl(var(--glass-shadow)/0.10),inset_0_1px_0_hsl(var(--glass-border)/0.14)]",
+        featured
+          ? "bg-primary/10"
+          : "bg-background/26 hover:bg-muted/55"
+      )}
+    >
+      <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+
+      <span className="relative flex min-w-0 items-center gap-3">
+        <span
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-all shadow-[inset_0_1px_0_hsl(var(--glass-border)/0.10)]",
+            featured
+              ? "bg-primary text-primary-foreground shadow-[0_12px_28px_hsl(var(--primary)/0.20)]"
+              : "bg-background/38 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary"
+          )}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-black text-foreground">
+            {label}
+          </span>
+
+          <span className="mt-0.5 block truncate text-[11px] leading-5 text-muted-foreground">
+            {description}
+          </span>
+        </span>
+      </span>
+
+      <ChevronLeft
+        className={cn(
+          "relative h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1",
+          featured && "text-primary"
+        )}
+      />
+    </button>
+  );
+}
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) return "؟";
+  if (parts.length === 1) return parts[0].slice(0, 2);
+
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`;
+}

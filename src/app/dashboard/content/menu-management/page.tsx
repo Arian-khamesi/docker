@@ -9,6 +9,7 @@ import { MenuItemDrawer } from "@/components/menu/menu-item-drawer";
 import { useMenuStore } from "@/store/menu.store";
 
 export default function MenuManagementPage() {
+
   const {
     activeTab,
     desktopMenu,
