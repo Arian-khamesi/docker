@@ -3,56 +3,32 @@
 import { useMemo } from "react";
 import { useParams } from "next/navigation";
 
-import { useSalesOrdersStore } from "@/store/sales-orders.store";
 import { salesOrdersPageClass } from "@/components/sales/orders/sales-orders.constants";
-import {
-  CustomerSection,
-  MissingKiyanAlert,
-  OrderDetailHero,
-  OrderDetailStats,
-  OrderNotFound,
-  OrderSnapshotSection,
-  PaymentShippingGrid,
-  ProductsSection,
-  OrderWorkflowLinks
-} from "@/components/sales/orders/detail/order-detail-core-sections";
-import {
-  OperationalOverview,
-  OrderLifecycleDetails,
-  OrderSidebar,
-} from "@/components/sales/orders/detail/order-detail-operational-sections";
+import { OrderDetailCommandCenter } from "@/components/sales/orders/detail/order-detail-command-center";
+import { OrderDetailTabbedLayout } from "@/components/sales/orders/detail/order-detail-tabbed-layout";
+import { OrderNotFound } from "@/components/sales/orders/detail/order-detail-core-sections";
+import { useSalesOrdersStore } from "@/store/sales-orders.store";
 
 export default function SalesOrderDetailPage() {
   const params = useParams<{ id: string }>();
-  const { orders } = useSalesOrdersStore();
+  const orderId = params.id;
+  const numericOrderId = Number(orderId);
+
+  const orders = useSalesOrdersStore((state) => state.orders);
 
   const order = useMemo(
-    () => orders.find((item) => String(item.id) === String(params.id)),
-    [orders, params.id]
+    () => orders.find((item) => item.id === numericOrderId),
+    [orders, numericOrderId]
   );
 
   if (!order) {
-    return <OrderNotFound orderId={params.id} />;
+    return <OrderNotFound orderId={orderId} />;
   }
 
   return (
-    <div className={salesOrdersPageClass}>
-      <OrderDetailHero order={order} />
-      <MissingKiyanAlert order={order} />
-      <OperationalOverview order={order} />
-      <OrderDetailStats order={order} />
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <main className="min-w-0 space-y-6">
-          <OrderSnapshotSection order={order} />
-          <CustomerSection order={order} />
-          <ProductsSection order={order} />
-          <PaymentShippingGrid order={order} />
-          <OrderLifecycleDetails order={order} />
-        </main>
-
-        <OrderSidebar order={order} />
-      </div>
-    </div>
+    <main className={salesOrdersPageClass}>
+      <OrderDetailCommandCenter order={order} />
+      <OrderDetailTabbedLayout order={order} />
+    </main>
   );
 }

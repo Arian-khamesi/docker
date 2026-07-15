@@ -44,6 +44,7 @@ import {
   salesOrdersPrimaryButtonClass,
   salesOrdersSecondaryButtonClass,
 } from "@/components/sales/orders/sales-orders.constants";
+import { OrderOperatorGuide } from "@/components/sales/orders/ux/order-operator-guidance";
 
 type SelectAll<T extends string> = T | "all";
 
@@ -143,6 +144,7 @@ export default function SalesOrdersPage() {
           </p>
         </div>
       </section>
+      <OrderOperatorGuide />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <SummaryCard

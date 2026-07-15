@@ -1,1208 +1,773 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import {
-  AlertTriangle,
   ArrowLeft,
-  CheckCircle2,
-  ClipboardCheck,
-  Eye,
+  Calculator,
+  Database,
+  Minus,
   PackagePlus,
-  ReceiptText,
+  Plus,
   RefreshCw,
+  Save,
+  ShoppingBasket,
   Smartphone,
   Trash2,
 } from "lucide-react";
 
 import {
+  SALES_ORDERS_BASE_PATH,
+  SALES_ORDERS_SNAPP_PATH,
   getSalesOrderDetailPath,
-  salesOrdersPageClass,
 } from "@/components/sales/orders/sales-orders.constants";
-import { getGatewayLabel, getStatusLabel } from "@/lib/orders/order-labels";
+import { OrderNotFound } from "@/components/sales/orders/detail/order-detail-core-sections";
+import { ProductVariantSelector } from "@/components/sales/orders/products/product-variant-selector";
+import {
+  OrderWorkflowSection,
+  OrderWorkflowShell,
+  OrderWorkflowStepper,
+  WorkflowInfoCard,
+  WorkflowPayloadPreview,
+  WorkflowResultBox,
+  type OrderWorkflowStep,
+} from "@/components/sales/orders/ux/order-workflow-shell";
+import { mockProductVariantCatalog } from "@/data/mock-product-variants";
+import {
+  buildInitialSnappBasket,
+  buildSnappUpdatePayload,
+  formatRialAsToman,
+  formatToman,
+  getComputedAmountRial,
+  getOrderPayableAmountToman,
+  getOrderPaymentToken,
+  getOrderUserId,
+  validateSnappUpdatePayload,
+} from "@/lib/orders/snapp-payload";
+import { snappOrdersService } from "@/services/snapp-orders.service";
 import { useSalesOrdersStore } from "@/store/sales-orders.store";
-import type { SalesOrder, SalesOrderProduct } from "@/types/sales-order";
-
-interface SnappBasketDraftItem {
-  id: string;
-  sourceProductId?: string;
-  productCode: string;
-  snappProductId: string;
-  name: string;
-  category: string;
-  color?: string;
-  size?: string;
-  count: number;
-  unitAmountRial: number;
-}
-
-interface SnappUpdatePayload {
-  order_id: number | string;
-  user_id: number | string;
-  payment_token: string;
-  all_amount: number;
-  currency: "IRR";
-  computed_amount: number;
-  override_amount: number;
-  difference: number;
-  parameters: {
-    amount: number;
-    category: string;
-    count: number;
-    id: string;
-    name: string;
-  }[];
-  mode: "simulate";
-}
+import type { ProductVariantSelection } from "@/types/product-variant";
+import type {
+  SnappBasketDraftItem,
+  SnappOrdersServiceMode,
+  SnappUpdateApiResponse,
+} from "@/types/snapp-order";
 
 export default function SnappUpdateWorkflowPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
+  const orderId = params.id;
+  const numericOrderId = Number(orderId);
 
-  const orderId = Number(params.id);
-
-  const { orders, updateExternalSyncStatus, markOrderNeedsFollowUp } =
-    useSalesOrdersStore();
+  const orders = useSalesOrdersStore((state) => state.orders);
+  const updateExternalSyncStatus = useSalesOrdersStore(
+    (state) => state.updateExternalSyncStatus
+  );
 
   const order = useMemo(
-    () => orders.find((item) => item.id === orderId),
-    [orderId, orders]
+    () => orders.find((item) => item.id === numericOrderId),
+    [orders, numericOrderId]
   );
 
   const [basketItems, setBasketItems] = useState<SnappBasketDraftItem[]>(() =>
     order ? buildInitialSnappBasket(order) : []
   );
 
-  const [manualProductCode, setManualProductCode] = useState("");
-  const [manualSnappProductId, setManualSnappProductId] = useState("");
-  const [manualName, setManualName] = useState("");
-  const [manualCategory, setManualCategory] = useState("");
-  const [manualColor, setManualColor] = useState("");
-  const [manualSize, setManualSize] = useState("");
-  const [manualCount, setManualCount] = useState("1");
-  const [manualUnitAmountToman, setManualUnitAmountToman] = useState("");
-
   const [overrideAmountToman, setOverrideAmountToman] = useState(() =>
     order ? String(getOrderPayableAmountToman(order)) : ""
   );
 
-  const [showPayload, setShowPayload] = useState(true);
-  const [operatorNote, setOperatorNote] = useState("");
-  const [mockResult, setMockResult] = useState<
-    | {
-        type: "success" | "error";
-        title: string;
-        message: string;
-      }
-    | null
-  >(null);
+  const [selectedVariant, setSelectedVariant] =
+    useState<ProductVariantSelection | null>(null);
+
+  const [selectedVariantCount, setSelectedVariantCount] = useState("1");
+
+  const [serviceMode, setServiceMode] =
+    useState<SnappOrdersServiceMode>("mock");
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [apiResponse, setApiResponse] =
+    useState<SnappUpdateApiResponse | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const payload = useMemo(() => {
+    if (!order) return null;
+
+    return buildSnappUpdatePayload({
+      order,
+      basketItems,
+      overrideAmountToman: Number(overrideAmountToman || 0),
+    });
+  }, [basketItems, order, overrideAmountToman]);
+
+  const validation = useMemo(() => {
+    if (!order || !payload) {
+      return {
+        isValid: false,
+        errors: ["سفارش یا payload قابل ساخت نیست."],
+        warnings: [],
+      };
+    }
+
+    return validateSnappUpdatePayload({
+      order,
+      basketItems,
+      payload,
+    });
+  }, [basketItems, order, payload]);
 
   const computedAmountRial = useMemo(
-    () =>
-      basketItems.reduce(
-        (total, item) => total + item.unitAmountRial * item.count,
-        0
-      ),
+    () => getComputedAmountRial(basketItems),
     [basketItems]
   );
 
-  const overrideAmountRial = toNumberFromText(overrideAmountToman) * 10;
-  const originalAmountRial = order ? getOrderPayableAmountToman(order) * 10 : 0;
-  const difference = overrideAmountRial - computedAmountRial;
-
-  const payload = useMemo<SnappUpdatePayload | null>(() => {
-    if (!order) return null;
-
-    return {
-      order_id: order.id,
-      user_id: getOrderUserId(order),
-      payment_token: getOrderPaymentToken(order),
-      all_amount: overrideAmountRial || computedAmountRial,
-      currency: "IRR",
-      computed_amount: computedAmountRial,
-      override_amount: overrideAmountRial,
-      difference,
-      parameters: basketItems.map((item) => ({
-        amount: item.unitAmountRial,
-        category: item.category || "نامشخص",
-        count: item.count,
-        id: item.snappProductId,
-        name: item.name || item.productCode || "محصول",
-      })),
-      mode: "simulate",
-    };
-  }, [basketItems, computedAmountRial, difference, order, overrideAmountRial]);
-
-  const validation = useMemo(() => {
-    if (!order) return "سفارش پیدا نشد.";
-
-    if (!isSnappOrder(order)) {
-      return "این سفارش SnappPay نیست و امکان آپدیت اسنپ برای آن فعال نیست.";
-    }
-
-    if (!getOrderPaymentToken(order)) {
-      return "payment_token سفارش مشخص نیست.";
-    }
-
-    if (!basketItems.length) {
-      return "سبد جدید خالی است. حداقل یک محصول باید در سبد باشد.";
-    }
-
-    if (!overrideAmountRial || overrideAmountRial <= 0) {
-      return "مبلغ نهایی کل را وارد کن.";
-    }
-
-    if (overrideAmountRial > originalAmountRial) {
-      return "در آپدیت اسنپ، مبلغ جدید نمی‌تواند از مبلغ اولیه سفارش بیشتر باشد.";
-    }
-
-    const invalidItem = basketItems.find(
-      (item) =>
-        !item.snappProductId ||
-        !item.name ||
-        !item.category ||
-        !item.count ||
-        !item.unitAmountRial
-    );
-
-    if (invalidItem) {
-      return "همه آیتم‌های سبد باید شناسه اسنپ، نام، دسته‌بندی، تعداد و مبلغ واحد داشته باشند.";
-    }
-
-    return "";
-  }, [basketItems, order, originalAmountRial, overrideAmountRial]);
-
   if (!order) {
-    return (
-      <main className={salesOrdersPageClass}>
-        <section className="rounded-[2rem] bg-white/55 p-8 text-center shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-          <h1 className="text-xl font-black text-foreground">
-            سفارش پیدا نشد
-          </h1>
-
-          <p className="mt-2 text-sm text-muted-foreground">
-            شماره سفارش معتبر نیست یا در store فعلی وجود ندارد.
-          </p>
-
-          <Link
-            href="/dashboard/orders/snapp"
-            className="mt-5 inline-flex h-11 items-center justify-center rounded-[1.3rem] bg-sky-600 px-5 text-sm font-black text-white"
-          >
-            بازگشت به سفارش‌های اسنپ
-          </Link>
-        </section>
-      </main>
-    );
+    return <OrderNotFound orderId={orderId} />;
   }
 
-  function addManualItem() {
-    const count = Math.max(1, Number(manualCount || 1));
-    const unitAmountRial = toNumberFromText(manualUnitAmountToman) * 10;
-
-    if (!manualProductCode.trim()) return;
-    if (!manualName.trim()) return;
-    if (!manualCategory.trim()) return;
-    if (!unitAmountRial) return;
-
-    const snappProductId =
-      manualSnappProductId.trim() ||
-      buildSnappProductId({
-        productCode: manualProductCode,
-        color: manualColor,
-        size: manualSize,
-      });
-
-    setBasketItems((prev) => [
-      ...prev,
-      {
-        id: `manual-${Date.now()}`,
-        productCode: manualProductCode.trim(),
-        snappProductId,
-        name: manualName.trim(),
-        category: manualCategory.trim(),
-        color: manualColor.trim() || undefined,
-        size: manualSize.trim() || undefined,
-        count,
-        unitAmountRial,
-      },
-    ]);
-
-    setManualProductCode("");
-    setManualSnappProductId("");
-    setManualName("");
-    setManualCategory("");
-    setManualColor("");
-    setManualSize("");
-    setManualCount("1");
-    setManualUnitAmountToman("");
-  }
-
-  function addProductToBasket(product: SalesOrderProduct) {
-    const item = createDraftItemFromProduct(product);
-
-    setBasketItems((prev) => [
-      ...prev,
-      {
-        ...item,
-        id: `${item.id}-${Date.now()}`,
-      },
-    ]);
-  }
+  const steps = getWorkflowSteps({
+    hasBasket: basketItems.length > 0,
+    hasValidationError: validation.errors.length > 0,
+    hasPayload: Boolean(payload),
+    hasResponse: Boolean(apiResponse),
+    isSubmitting,
+  });
 
   function updateBasketItem(
     itemId: string,
     patch: Partial<SnappBasketDraftItem>
   ) {
-    setBasketItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, ...patch } : item))
+    setBasketItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      )
     );
   }
 
   function removeBasketItem(itemId: string) {
-    setBasketItems((prev) => prev.filter((item) => item.id !== itemId));
+    setBasketItems((current) => current.filter((item) => item.id !== itemId));
   }
 
-  function submitMockSync() {
-    if (validation || !payload) {
-      setMockResult({
-        type: "error",
-        title: "ارسال انجام نشد",
-        message: validation || "payload معتبر نیست.",
+  function addSelectedVariantToBasket() {
+    if (!selectedVariant) return;
+
+    const count = Math.max(1, Number(selectedVariantCount || 1));
+
+    const newItem: SnappBasketDraftItem = {
+      id: `variant-${selectedVariant.variantBarcode}`,
+      sourceProductId: selectedVariant.parentProductId,
+      productCode: selectedVariant.parentProductCode,
+      snappProductId: selectedVariant.variantBarcode,
+      name: selectedVariant.parentProductTitle,
+      category: selectedVariant.categoryTitle ?? "نامشخص",
+      color: selectedVariant.colorTitle,
+      size: selectedVariant.sizeTitle,
+      count,
+      unitAmountRial: selectedVariant.priceToman * 10,
+    };
+
+    setBasketItems((current) => {
+      const existingItem = current.find(
+        (item) => item.snappProductId === selectedVariant.variantBarcode
+      );
+
+      if (!existingItem) {
+        return [...current, newItem];
+      }
+
+      return current.map((item) =>
+        item.id === existingItem.id
+          ? {
+              ...item,
+              productCode: newItem.productCode,
+              snappProductId: newItem.snappProductId,
+              name: newItem.name,
+              category: newItem.category,
+              color: newItem.color,
+              size: newItem.size,
+              unitAmountRial: newItem.unitAmountRial,
+              count: item.count + count,
+            }
+          : item
+      );
+    });
+
+    setSelectedVariant(null);
+    setSelectedVariantCount("1");
+  }
+
+  async function submitSync() {
+    if (!payload || !validation.isValid) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    setApiResponse(null);
+
+    try {
+      const response = await snappOrdersService.updateTransaction(payload, {
+        mode: serviceMode,
       });
-      return;
+
+      setApiResponse(response);
+
+      if (response.success && response.category === "success") {
+        updateExternalSyncStatus(order.id, "synced");
+      } else {
+        updateExternalSyncStatus(order.id, "manual_review", response.message);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "خطای ناشناخته هنگام آپدیت اسنپ رخ داد.";
+
+      setSubmitError(message);
+      updateExternalSyncStatus(order.id, "failed", message);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    updateExternalSyncStatus(
-      order.id,
-      "synced",
-      operatorNote.trim() || undefined
-    );
-
-    markOrderNeedsFollowUp(
-      order.id,
-      false,
-      "آپدیت SnappPay با موفقیت mock شد."
-    );
-
-    setMockResult({
-      type: "success",
-      title: "آپدیت mock موفق",
-      message:
-        "payload اسنپ ساخته شد و وضعیت externalSync سفارش به synced تغییر کرد.",
-    });
-  }
-
-  function markAsManualReview() {
-    updateExternalSyncStatus(
-      order.id,
-      "manual_review",
-      operatorNote.trim() || "نیازمند بررسی دستی آپدیت اسنپ."
-    );
-
-    markOrderNeedsFollowUp(
-      order.id,
-      true,
-      "آپدیت SnappPay نیازمند بررسی دستی است."
-    );
-
-    setMockResult({
-      type: "error",
-      title: "ثبت بررسی دستی",
-      message: "وضعیت سفارش برای بررسی دستی sync اسنپ ذخیره شد.",
-    });
-  }
-
-  function markAsFailed() {
-    updateExternalSyncStatus(
-      order.id,
-      "failed",
-      operatorNote.trim() || "خطای mock در آپدیت SnappPay."
-    );
-
-    markOrderNeedsFollowUp(
-      order.id,
-      true,
-      "آپدیت SnappPay با خطا مواجه شد."
-    );
-
-    setMockResult({
-      type: "error",
-      title: "ثبت خطای sync",
-      message: "وضعیت externalSync سفارش به failed تغییر کرد.",
-    });
   }
 
   return (
-    <main className={salesOrdersPageClass}>
-      <section className="relative overflow-hidden rounded-[2.2rem] bg-sky-500/[0.08] p-5 shadow-[0_18px_48px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-sky-400/[0.07]">
-        <div className="pointer-events-none absolute -left-20 -top-20 h-52 w-52 rounded-full bg-sky-500/15 blur-3xl" />
+    <main className="space-y-4">
+      <OrderWorkflowShell
+        eyebrow="SnappPay Update"
+        title={`آپدیت اسنپ برای سفارش #${order.id}`}
+        description="این workflow برای زمانی است که بعد از مرجوعی، تعویض یا اصلاح سفارش باید سبد و مبلغ جدید به SnappPay اعلام شود."
+        orderLabel={`Order #${order.id}`}
+        tone="sky"
+        icon={Smartphone}
+        breadcrumb={[
+          {
+            label: "همه سفارشات",
+            href: SALES_ORDERS_BASE_PATH,
+          },
+          {
+            label: "سفارش‌های اسنپ",
+            href: SALES_ORDERS_SNAPP_PATH,
+          },
+          {
+            label: `سفارش #${order.id}`,
+            href: getSalesOrderDetailPath(order.id),
+          },
+          {
+            label: "آپدیت اسنپ",
+          },
+        ]}
+        goal="ساخت سبد نهایی، کنترل مبلغ و ثبت نتیجه sync اسنپ."
+        currentStep={getCurrentStepLabel(steps)}
+        expectedResult="ثبت وضعیت synced یا manual_review برای سفارش."
+        secondaryActions={[
+          {
+            label: "جزئیات سفارش",
+            href: getSalesOrderDetailPath(order.id),
+          },
+          {
+            label: "سفارش‌های اسنپ",
+            href: SALES_ORDERS_SNAPP_PATH,
+          },
+        ]}
+      >
+        <OrderWorkflowStepper steps={steps} />
 
-        <div className="relative flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-700 dark:text-sky-300">
-                <Smartphone className="h-6 w-6" />
+        <OrderWorkflowSection
+          title="۱. Context سفارش"
+          description="قبل از تغییر سبد، اول مطمئن شو سفارش، token، user و مبلغ اولیه درست هستند."
+          variant="context"
+          icon={Database}
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <WorkflowInfoCard
+              label="شماره سفارش"
+              value={`#${order.id}`}
+              tone="sky"
+            />
+
+            <WorkflowInfoCard
+              label="User ID"
+              value={String(getOrderUserId(order))}
+              tone="slate"
+            />
+
+            <WorkflowInfoCard
+              label="Payment Token"
+              value={getOrderPaymentToken(order)}
+              tone="violet"
+            />
+
+            <WorkflowInfoCard
+              label="مبلغ اولیه سفارش"
+              value={`${formatToman(getOrderPayableAmountToman(order))} تومان`}
+              tone="emerald"
+            />
+          </div>
+        </OrderWorkflowSection>
+
+        <OrderWorkflowSection
+          title="۲. ساخت سبد جدید اسنپ"
+          description="سبد جدید باید وضعیت نهایی سفارش بعد از مرجوعی یا تعویض را نشان دهد. هر کالای جدید باید با barcode یونیک variant انتخاب شود."
+          variant="input"
+          icon={ShoppingBasket}
+        >
+          <div className="grid gap-3">
+            {basketItems.length ? (
+              basketItems.map((item) => (
+                <BasketItemEditor
+                  key={item.id}
+                  item={item}
+                  onChange={(patch) => updateBasketItem(item.id, patch)}
+                  onRemove={() => removeBasketItem(item.id)}
+                />
+              ))
+            ) : (
+              <WorkflowResultBox
+                type="warning"
+                title="سبد خالی است"
+                message="برای ارسال آپدیت به اسنپ باید حداقل یک آیتم در سبد جدید وجود داشته باشد."
+              />
+            )}
+          </div>
+
+          <div className="mt-4 rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-700 dark:text-violet-300">
+                <PackagePlus className="h-5 w-5" />
               </div>
 
               <div>
-                <p className="text-xs font-black text-sky-700 dark:text-sky-300">
-                  SnappPay Update Workflow
-                </p>
+                <h3 className="text-sm font-black text-foreground">
+                  افزودن محصول از کاتالوگ variant
+                </h3>
 
-                <h1 className="mt-1 text-2xl font-black text-foreground">
-                  آپدیت سفارش اسنپ #{order.id}
-                </h1>
+                <p className="mt-1 text-xs font-bold leading-6 text-muted-foreground">
+                  رنگ و سایز دستی وارد نمی‌شوند؛ محصول مادر، رنگ و سایز از
+                  گزینه‌های واقعی انتخاب می‌شوند و barcode یونیک variant به سبد
+                  اضافه می‌شود.
+                </p>
               </div>
             </div>
 
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-muted-foreground">
-              این workflow برای ساخت سبد جدید اسنپ، کنترل مبلغ نهایی، مشاهده
-              payload و ثبت وضعیت sync استفاده می‌شود.
-            </p>
+            <ProductVariantSelector
+              products={mockProductVariantCatalog}
+              value={selectedVariant}
+              onChange={setSelectedVariant}
+              title="انتخاب کالای دقیق"
+              description="محصول مادر را انتخاب کن، سپس رنگ و سایز را انتخاب کن تا barcode نهایی همان variant مشخص شود."
+            />
+
+            <div className="mt-4 grid gap-3 md:grid-cols-[240px_1fr]">
+              <WorkflowInput
+                label="تعداد برای افزودن"
+                value={selectedVariantCount}
+                onChange={setSelectedVariantCount}
+                dir="ltr"
+                type="number"
+              />
+
+              <div className="flex flex-col justify-end">
+                <button
+                  type="button"
+                  onClick={addSelectedVariantToBasket}
+                  disabled={!selectedVariant}
+                  className={[
+                    "inline-flex h-11 items-center justify-center gap-2 rounded-[1.3rem] px-5 text-xs font-black text-white transition",
+                    selectedVariant
+                      ? "bg-violet-600 hover:-translate-y-0.5"
+                      : "cursor-not-allowed bg-slate-400",
+                  ].join(" ")}
+                >
+                  <Plus className="h-4 w-4" />
+                  افزودن variant انتخاب‌شده به سبد
+                </button>
+              </div>
+            </div>
+          </div>
+        </OrderWorkflowSection>
+
+        <OrderWorkflowSection
+          title="۳. کنترل مبلغ و اعتبارسنجی"
+          description="مبلغ نهایی نباید بیشتر از مبلغ اولیه سفارش باشد. اگر مبلغ override با مبلغ محاسبه‌شده فرق دارد، اپراتور باید آگاه باشد."
+          variant="validation"
+          icon={Calculator}
+        >
+          <div className="grid gap-3 md:grid-cols-3">
+            <WorkflowInfoCard
+              label="مبلغ محاسبه‌شده سبد"
+              value={`${formatRialAsToman(computedAmountRial)} تومان`}
+              tone="sky"
+            />
+
+            <WorkflowInput
+              label="مبلغ نهایی قابل ارسال / تومان"
+              value={overrideAmountToman}
+              onChange={setOverrideAmountToman}
+              dir="ltr"
+              type="number"
+            />
+
+            <WorkflowInfoCard
+              label="اختلاف"
+              value={
+                payload
+                  ? `${formatRialAsToman(payload.difference)} تومان`
+                  : "نامشخص"
+              }
+              tone={payload?.difference === 0 ? "emerald" : "amber"}
+            />
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={getSalesOrderDetailPath(order.id)}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-[1.3rem] bg-white/65 px-4 text-xs font-black text-foreground transition hover:-translate-y-0.5 dark:bg-white/[0.06]"
-            >
-              جزئیات سفارش
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+          <div className="mt-4 grid gap-3">
+            {validation.errors.map((error) => (
+              <WorkflowResultBox
+                key={error}
+                type="error"
+                title="خطای اعتبارسنجی"
+                message={error}
+              />
+            ))}
 
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="inline-flex h-11 items-center justify-center rounded-[1.3rem] bg-white/45 px-4 text-xs font-black text-muted-foreground transition hover:-translate-y-0.5 dark:bg-white/[0.04]"
-            >
-              بازگشت
-            </button>
+            {validation.warnings.map((warning) => (
+              <WorkflowResultBox
+                key={warning}
+                type="warning"
+                title="هشدار"
+                message={warning}
+              />
+            ))}
+
+            {validation.isValid ? (
+              <WorkflowResultBox
+                type="success"
+                title="Payload قابل ارسال است"
+                message="کنترل‌های اصلی انجام شده و امکان ارسال آپدیت وجود دارد."
+              />
+            ) : null}
           </div>
-        </div>
-      </section>
+        </OrderWorkflowSection>
 
-      <section className="grid gap-4 xl:grid-cols-[1fr_0.95fr]">
-        <div className="grid gap-4">
-          <OrderSnapshot order={order} />
-
-          <SuggestedProductsPanel order={order} onAdd={addProductToBasket} />
-
-          <ManualProductPanel
-            productCode={manualProductCode}
-            setProductCode={setManualProductCode}
-            snappProductId={manualSnappProductId}
-            setSnappProductId={setManualSnappProductId}
-            name={manualName}
-            setName={setManualName}
-            category={manualCategory}
-            setCategory={setManualCategory}
-            color={manualColor}
-            setColor={setManualColor}
-            size={manualSize}
-            setSize={setManualSize}
-            count={manualCount}
-            setCount={setManualCount}
-            unitAmountToman={manualUnitAmountToman}
-            setUnitAmountToman={setManualUnitAmountToman}
-            onAdd={addManualItem}
-          />
-
-          <BasketBuilderPanel
-            items={basketItems}
-            updateItem={updateBasketItem}
-            removeItem={removeBasketItem}
-            clearItems={() => setBasketItems([])}
-          />
-        </div>
-
-        <aside className="grid content-start gap-4">
-          <AmountControlPanel
-            originalAmountRial={originalAmountRial}
-            computedAmountRial={computedAmountRial}
-            overrideAmountToman={overrideAmountToman}
-            setOverrideAmountToman={setOverrideAmountToman}
-            difference={difference}
-            validation={validation}
-          />
-
-          <PayloadPreviewPanel
+        {payload ? (
+          <WorkflowPayloadPreview
             payload={payload}
-            showPayload={showPayload}
-            setShowPayload={setShowPayload}
+            title="۴. Preview Payload اسنپ"
+            description="این payload قبل از ارسال باید توسط اپراتور بررسی شود."
           />
+        ) : null}
 
-          <ActionPanel
-            validation={validation}
-            operatorNote={operatorNote}
-            setOperatorNote={setOperatorNote}
-            onSubmit={submitMockSync}
-            onManualReview={markAsManualReview}
-            onFailed={markAsFailed}
-          />
+        <OrderWorkflowSection
+          title="۵. ارسال و ثبت نتیجه"
+          description="فعلاً امکان ارسال mock و api-ready داریم. در حالت mock، نتیجه در store local ثبت می‌شود."
+          variant="submit"
+          icon={Save}
+        >
+          <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+            <div className="rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+              <p className="text-sm font-black text-foreground">حالت ارسال</p>
 
-          {mockResult ? <ResultPanel result={mockResult} /> : null}
-        </aside>
-      </section>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setServiceMode("mock")}
+                  className={[
+                    "h-11 rounded-[1.3rem] text-xs font-black transition",
+                    serviceMode === "mock"
+                      ? "bg-sky-600 text-white"
+                      : "bg-white/65 text-foreground dark:bg-white/[0.05]",
+                  ].join(" ")}
+                >
+                  mock
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setServiceMode("api")}
+                  className={[
+                    "h-11 rounded-[1.3rem] text-xs font-black transition",
+                    serviceMode === "api"
+                      ? "bg-violet-600 text-white"
+                      : "bg-white/65 text-foreground dark:bg-white/[0.05]",
+                  ].join(" ")}
+                >
+                  api
+                </button>
+              </div>
+
+              <button
+                type="button"
+                disabled={!validation.isValid || isSubmitting}
+                onClick={submitSync}
+                className={[
+                  "mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[1.4rem] text-sm font-black text-white transition",
+                  validation.isValid && !isSubmitting
+                    ? "bg-emerald-600 hover:-translate-y-0.5"
+                    : "cursor-not-allowed bg-slate-400",
+                ].join(" ")}
+              >
+                {isSubmitting ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                ثبت نتیجه sync
+              </button>
+
+              <Link
+                href={getSalesOrderDetailPath(order.id)}
+                className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-[1.3rem] bg-white/65 text-xs font-black text-foreground transition hover:-translate-y-0.5 dark:bg-white/[0.05]"
+              >
+                بازگشت به جزئیات سفارش
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </div>
+
+            <div className="space-y-3">
+              {apiResponse ? (
+                <WorkflowResultBox
+                  type={
+                    apiResponse.success && apiResponse.category === "success"
+                      ? "success"
+                      : "warning"
+                  }
+                  title={
+                    apiResponse.success && apiResponse.category === "success"
+                      ? "Sync موفق ثبت شد"
+                      : "نتیجه نیازمند بررسی است"
+                  }
+                  message={apiResponse.message}
+                  details={
+                    apiResponse.data ? (
+                      <pre
+                        dir="ltr"
+                        className="overflow-auto rounded-[1.2rem] bg-slate-950 p-3 text-left text-xs leading-6 text-slate-100"
+                      >
+                        {JSON.stringify(apiResponse.data, null, 2)}
+                      </pre>
+                    ) : null
+                  }
+                />
+              ) : null}
+
+              {submitError ? (
+                <WorkflowResultBox
+                  type="error"
+                  title="ارسال ناموفق بود"
+                  message={submitError}
+                />
+              ) : null}
+
+              {!apiResponse && !submitError ? (
+                <WorkflowResultBox
+                  type="info"
+                  title="هنوز نتیجه‌ای ثبت نشده"
+                  message="بعد از کنترل payload، روی ثبت نتیجه sync بزن."
+                />
+              ) : null}
+            </div>
+          </div>
+        </OrderWorkflowSection>
+      </OrderWorkflowShell>
     </main>
   );
 }
 
-function OrderSnapshot({ order }: { order: SalesOrder }) {
+function BasketItemEditor({
+  item,
+  onChange,
+  onRemove,
+}: {
+  item: SnappBasketDraftItem;
+  onChange: (patch: Partial<SnappBasketDraftItem>) => void;
+  onRemove: () => void;
+}) {
+  const unitAmountToman = Math.round(item.unitAmountRial / 10);
+  const totalRial = item.unitAmountRial * item.count;
+
   return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-700 dark:text-sky-300">
-          <ReceiptText className="h-5 w-5" />
-        </div>
+    <div className="rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+      <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h3 className="text-sm font-black text-foreground">{item.name}</h3>
 
-        <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-black text-foreground">
-            اطلاعات سفارش
-          </h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="rounded-full bg-slate-500/10 px-3 py-1 text-[11px] font-black text-slate-700 dark:text-slate-300">
+              کد پدر: {item.productCode}
+            </span>
 
-          <p className="mt-2 text-sm font-bold text-muted-foreground">
-            {order.customer.fullName} · {order.customer.mobile} ·{" "}
-            {order.customer.city}
-          </p>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <InfoRow label="وضعیت سفارش" value={getStatusLabel(order.status)} />
-            <InfoRow label="درگاه" value={getGatewayLabel(order.payment.gateway)} />
-            <InfoRow
-              label="مبلغ اولیه"
-              value={`${getOrderPayableAmountToman(order).toLocaleString(
-                "fa-IR"
-              )} تومان`}
-            />
-            <InfoRow
-              label="payment token"
-              value={getOrderPaymentToken(order)}
+            <span
               dir="ltr"
-            />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SuggestedProductsPanel({
-  order,
-  onAdd,
-}: {
-  order: SalesOrder;
-  onAdd: (product: SalesOrderProduct) => void;
-}) {
-  const suggestedProducts = [
-    ...(order.exchangeInfo?.replacementProducts ?? []),
-    ...order.products,
-  ];
-
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-foreground">
-            محصولات پیشنهادی برای سبد جدید
-          </h2>
-
-          <p className="mt-2 text-sm leading-7 text-muted-foreground">
-            برای تعویض، محصولات جایگزین در اولویت نمایش داده می‌شوند. برای
-            مرجوعی می‌توانی فقط کالاهای باقی‌مانده را در سبد نگه داری.
-          </p>
-        </div>
-
-        <PackagePlus className="h-5 w-5 text-sky-700 dark:text-sky-300" />
-      </div>
-
-      <div className="mt-4 grid gap-2">
-        {suggestedProducts.map((product) => (
-          <div
-            key={`${product.id}-${product.productCode}-${product.color}-${product.size}`}
-            className="flex flex-col gap-3 rounded-[1.4rem] bg-white/45 p-3 dark:bg-white/[0.04] md:flex-row md:items-center md:justify-between"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black text-foreground">
-                {product.title}
-              </p>
-
-              <p className="mt-1 text-xs font-bold text-muted-foreground">
-                {product.productCode} · {product.color ?? "-"} ·{" "}
-                {product.size ?? "-"} · {product.quantity} عدد
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onAdd(product)}
-              className="h-10 rounded-[1.2rem] bg-sky-600 px-4 text-xs font-black text-white transition hover:-translate-y-0.5"
+              className="rounded-full bg-sky-500/10 px-3 py-1 text-[11px] font-black text-sky-700 dark:text-sky-300"
             >
-              افزودن به سبد اسنپ
-            </button>
+              barcode: {item.snappProductId}
+            </span>
+
+            {item.color ? (
+              <span className="rounded-full bg-violet-500/10 px-3 py-1 text-[11px] font-black text-violet-700 dark:text-violet-300">
+                رنگ: {item.color}
+              </span>
+            ) : null}
+
+            {item.size ? (
+              <span className="rounded-full bg-amber-500/10 px-3 py-1 text-[11px] font-black text-amber-700 dark:text-amber-300">
+                سایز: {item.size}
+              </span>
+            ) : null}
           </div>
-        ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-[1.2rem] bg-rose-500/10 px-3 text-xs font-black text-rose-700 dark:text-rose-300"
+        >
+          <Trash2 className="h-4 w-4" />
+          حذف
+        </button>
       </div>
-    </section>
-  );
-}
 
-function ManualProductPanel({
-  productCode,
-  setProductCode,
-  snappProductId,
-  setSnappProductId,
-  name,
-  setName,
-  category,
-  setCategory,
-  color,
-  setColor,
-  size,
-  setSize,
-  count,
-  setCount,
-  unitAmountToman,
-  setUnitAmountToman,
-  onAdd,
-}: {
-  productCode: string;
-  setProductCode: (value: string) => void;
-  snappProductId: string;
-  setSnappProductId: (value: string) => void;
-  name: string;
-  setName: (value: string) => void;
-  category: string;
-  setCategory: (value: string) => void;
-  color: string;
-  setColor: (value: string) => void;
-  size: string;
-  setSize: (value: string) => void;
-  count: string;
-  setCount: (value: string) => void;
-  unitAmountToman: string;
-  setUnitAmountToman: (value: string) => void;
-  onAdd: () => void;
-}) {
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <h2 className="text-lg font-black text-foreground">
-        افزودن دستی محصول
-      </h2>
-
-      <p className="mt-2 text-sm leading-7 text-muted-foreground">
-        وقتی محصول از سفارش یا تعویض در دسترس نیست، می‌توانی آیتم را دستی وارد
-        کنی. شناسه اسنپ را اگر دقیق داری وارد کن؛ اگر خالی باشد، موقتاً ساخته
-        می‌شود.
-      </p>
-
-      <div className="mt-4 grid gap-2 md:grid-cols-2">
-        <SnappInput
-          label="کد محصول"
-          value={productCode}
-          onChange={setProductCode}
-          placeholder="02280"
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <WorkflowInput
+          label="نام کالا"
+          value={item.name}
+          onChange={(value) => onChange({ name: value })}
         />
 
-        <SnappInput
-          label="شناسه محصول اسنپ"
-          value={snappProductId}
-          onChange={setSnappProductId}
-          placeholder="مثلاً 0413035"
-          dir="ltr"
-        />
-
-        <SnappInput
-          label="نام محصول"
-          value={name}
-          onChange={setName}
-          placeholder="نام کالا"
-        />
-
-        <SnappInput
+        <WorkflowInput
           label="دسته‌بندی"
-          value={category}
-          onChange={setCategory}
-          placeholder="مثلاً پوشاک"
+          value={item.category}
+          onChange={(value) => onChange({ category: value })}
         />
 
-        <SnappInput
-          label="رنگ"
-          value={color}
-          onChange={setColor}
-          placeholder="مشکی"
-        />
-
-        <SnappInput
-          label="سایز"
-          value={size}
-          onChange={setSize}
-          placeholder="L"
-        />
-
-        <SnappInput
+        <WorkflowInput
           label="تعداد"
-          value={count}
-          onChange={setCount}
-          placeholder="1"
+          value={String(item.count)}
+          onChange={(value) => onChange({ count: Number(value || 0) })}
+          dir="ltr"
           type="number"
-          dir="ltr"
         />
 
-        <SnappInput
-          label="قیمت واحد نهایی، تومان"
-          value={unitAmountToman}
-          onChange={setUnitAmountToman}
-          placeholder="1,250,000"
+        <WorkflowInput
+          label="مبلغ واحد / تومان"
+          value={String(unitAmountToman)}
+          onChange={(value) =>
+            onChange({ unitAmountRial: Number(value || 0) * 10 })
+          }
           dir="ltr"
+          type="number"
         />
       </div>
 
-      <button
-        type="button"
-        onClick={onAdd}
-        className="mt-4 h-11 rounded-[1.3rem] bg-sky-600 px-5 text-sm font-black text-white transition hover:-translate-y-0.5"
-      >
-        افزودن آیتم دستی
-      </button>
-    </section>
-  );
-}
-
-function BasketBuilderPanel({
-  items,
-  updateItem,
-  removeItem,
-  clearItems,
-}: {
-  items: SnappBasketDraftItem[];
-  updateItem: (id: string, patch: Partial<SnappBasketDraftItem>) => void;
-  removeItem: (id: string) => void;
-  clearItems: () => void;
-}) {
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-foreground">
-            سبد جدید اسنپ
-          </h2>
-
-          <p className="mt-2 text-sm text-muted-foreground">
-            این سبد داخل payload به عنوان `parameters` ارسال می‌شود.
-          </p>
-        </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => onChange({ count: Math.max(1, item.count - 1) })}
+          className="inline-flex h-9 items-center justify-center rounded-[1.1rem] bg-white/65 px-3 text-xs font-black text-foreground dark:bg-white/[0.05]"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
 
         <button
           type="button"
-          onClick={clearItems}
-          className="h-10 rounded-[1.2rem] bg-rose-500/10 px-4 text-xs font-black text-rose-700 transition hover:-translate-y-0.5 dark:text-rose-300"
+          onClick={() => onChange({ count: item.count + 1 })}
+          className="inline-flex h-9 items-center justify-center rounded-[1.1rem] bg-white/65 px-3 text-xs font-black text-foreground dark:bg-white/[0.05]"
         >
-          پاک کردن سبد
+          <Plus className="h-4 w-4" />
         </button>
-      </div>
 
-      <div className="mt-4 grid gap-3">
-        {items.length ? (
-          items.map((item) => (
-            <div
-              key={item.id}
-              className="rounded-[1.5rem] bg-white/45 p-3 dark:bg-white/[0.04]"
-            >
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                <div className="grid flex-1 gap-2 md:grid-cols-2">
-                  <SnappInput
-                    label="شناسه اسنپ"
-                    value={item.snappProductId}
-                    onChange={(value) =>
-                      updateItem(item.id, { snappProductId: value })
-                    }
-                    dir="ltr"
-                  />
-
-                  <SnappInput
-                    label="نام"
-                    value={item.name}
-                    onChange={(value) => updateItem(item.id, { name: value })}
-                  />
-
-                  <SnappInput
-                    label="دسته‌بندی"
-                    value={item.category}
-                    onChange={(value) =>
-                      updateItem(item.id, { category: value })
-                    }
-                  />
-
-                  <SnappInput
-                    label="تعداد"
-                    value={String(item.count)}
-                    onChange={(value) =>
-                      updateItem(item.id, {
-                        count: Math.max(1, Number(value || 1)),
-                      })
-                    }
-                    type="number"
-                    dir="ltr"
-                  />
-
-                  <SnappInput
-                    label="قیمت واحد، تومان"
-                    value={String(Math.round(item.unitAmountRial / 10))}
-                    onChange={(value) =>
-                      updateItem(item.id, {
-                        unitAmountRial: toNumberFromText(value) * 10,
-                      })
-                    }
-                    dir="ltr"
-                  />
-
-                  <InfoRow
-                    label="جمع آیتم"
-                    value={`${Math.round(
-                      (item.unitAmountRial * item.count) / 10
-                    ).toLocaleString("fa-IR")} تومان`}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeItem(item.id)}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-[1.3rem] bg-rose-500/10 text-xs font-black text-rose-700 transition hover:-translate-y-0.5 dark:text-rose-300 xl:w-32"
-                >
-                  حذف
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ))
-        ) : (
-          <p className="rounded-[1.5rem] bg-amber-500/10 px-4 py-3 text-sm font-black text-amber-700 dark:text-amber-300">
-            سبد جدید خالی است.
-          </p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function AmountControlPanel({
-  originalAmountRial,
-  computedAmountRial,
-  overrideAmountToman,
-  setOverrideAmountToman,
-  difference,
-  validation,
-}: {
-  originalAmountRial: number;
-  computedAmountRial: number;
-  overrideAmountToman: string;
-  setOverrideAmountToman: (value: string) => void;
-  difference: number;
-  validation: string;
-}) {
-  const isMoreThanOriginal =
-    toNumberFromText(overrideAmountToman) * 10 > originalAmountRial;
-
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <div className="flex items-center gap-2">
-        <ClipboardCheck className="h-5 w-5 text-sky-700 dark:text-sky-300" />
-        <h2 className="text-lg font-black text-foreground">کنترل مبلغ</h2>
-      </div>
-
-      <div className="mt-4 grid gap-2">
-        <InfoRow
-          label="مبلغ اولیه"
-          value={`${Math.round(originalAmountRial / 10).toLocaleString(
-            "fa-IR"
-          )} تومان`}
-        />
-
-        <InfoRow
-          label="جمع آیتم‌ها"
-          value={`${Math.round(computedAmountRial / 10).toLocaleString(
-            "fa-IR"
-          )} تومان`}
-        />
-
-        <SnappInput
-          label="مبلغ نهایی کل، تومان"
-          value={overrideAmountToman}
-          onChange={setOverrideAmountToman}
-          placeholder="مثلاً 1,250,000"
-          dir="ltr"
-        />
-
-        <InfoRow
-          label="اختلاف"
-          value={`${Math.round(difference / 10).toLocaleString("fa-IR")} تومان`}
-        />
-      </div>
-
-      {isMoreThanOriginal ? (
-        <WarningBox text="مبلغ جدید از مبلغ اولیه سفارش بیشتر است. طبق قانون فعلی، ارسال مجاز نیست." />
-      ) : null}
-
-      {difference !== 0 && !isMoreThanOriginal ? (
-        <WarningBox text="مبلغ نهایی با جمع آیتم‌ها برابر نیست. در ارسال واقعی باید اپراتور این اختلاف را آگاهانه تایید کند." />
-      ) : null}
-
-      {validation ? <ErrorBox text={validation} /> : null}
-    </section>
-  );
-}
-
-function PayloadPreviewPanel({
-  payload,
-  showPayload,
-  setShowPayload,
-}: {
-  payload: SnappUpdatePayload | null;
-  showPayload: boolean;
-  setShowPayload: (value: boolean) => void;
-}) {
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <button
-        type="button"
-        onClick={() => setShowPayload(!showPayload)}
-        className="flex w-full items-center justify-between gap-3 text-right"
-      >
-        <span className="flex items-center gap-2 text-lg font-black text-foreground">
-          <Eye className="h-5 w-5 text-sky-700 dark:text-sky-300" />
-          preview payload
+        <span className="inline-flex h-9 items-center rounded-[1.1rem] bg-sky-500/10 px-3 text-xs font-black text-sky-700 dark:text-sky-300">
+          جمع این ردیف: {formatRialAsToman(totalRial)} تومان
         </span>
-
-        <span className="text-xs font-black text-muted-foreground">
-          {showPayload ? "بستن" : "نمایش"}
-        </span>
-      </button>
-
-      {showPayload ? (
-        <pre
-          dir="ltr"
-          className="mt-4 max-h-[420px] overflow-auto rounded-[1.4rem] bg-slate-950 p-4 text-left text-xs leading-6 text-slate-100"
-        >
-          {JSON.stringify(payload, null, 2)}
-        </pre>
-      ) : null}
-    </section>
+      </div>
+    </div>
   );
 }
 
-function ActionPanel({
-  validation,
-  operatorNote,
-  setOperatorNote,
-  onSubmit,
-  onManualReview,
-  onFailed,
-}: {
-  validation: string;
-  operatorNote: string;
-  setOperatorNote: (value: string) => void;
-  onSubmit: () => void;
-  onManualReview: () => void;
-  onFailed: () => void;
-}) {
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <div className="flex items-center gap-2">
-        <RefreshCw className="h-5 w-5 text-sky-700 dark:text-sky-300" />
-        <h2 className="text-lg font-black text-foreground">ثبت نتیجه sync</h2>
-      </div>
-
-      <textarea
-        value={operatorNote}
-        onChange={(event) => setOperatorNote(event.target.value)}
-        placeholder="یادداشت اپراتور / دلیل خطا / توضیح sync..."
-        className="mt-4 min-h-24 w-full resize-none rounded-[1.4rem] bg-white/55 p-4 text-sm font-bold text-foreground outline-none placeholder:text-muted-foreground/70 dark:bg-white/[0.05]"
-      />
-
-      <div className="mt-4 grid gap-2">
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={Boolean(validation)}
-          className="h-12 rounded-[1.4rem] bg-sky-600 px-4 text-sm font-black text-white shadow-[0_14px_32px_rgba(2,132,199,0.18)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          ارسال mock و ثبت synced
-        </button>
-
-        <button
-          type="button"
-          onClick={onManualReview}
-          className="h-12 rounded-[1.4rem] bg-violet-500/10 px-4 text-sm font-black text-violet-700 transition hover:-translate-y-0.5 dark:text-violet-300"
-        >
-          ثبت manual review
-        </button>
-
-        <button
-          type="button"
-          onClick={onFailed}
-          className="h-12 rounded-[1.4rem] bg-rose-500/10 px-4 text-sm font-black text-rose-700 transition hover:-translate-y-0.5 dark:text-rose-300"
-        >
-          ثبت failed
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function ResultPanel({
-  result,
-}: {
-  result: { type: "success" | "error"; title: string; message: string };
-}) {
-  const isSuccess = result.type === "success";
-
-  return (
-    <section
-      className={[
-        "rounded-[2rem] p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl",
-        isSuccess
-          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-          : "bg-rose-500/10 text-rose-700 dark:text-rose-300",
-      ].join(" ")}
-    >
-      <div className="flex items-start gap-3">
-        {isSuccess ? (
-          <CheckCircle2 className="mt-0.5 h-5 w-5" />
-        ) : (
-          <AlertTriangle className="mt-0.5 h-5 w-5" />
-        )}
-
-        <div>
-          <h3 className="font-black">{result.title}</h3>
-          <p className="mt-1 text-sm font-bold leading-7">{result.message}</p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SnappInput({
+function WorkflowInput({
   label,
   value,
   onChange,
-  placeholder,
-  type = "text",
   dir = "rtl",
+  type = "text",
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  placeholder?: string;
-  type?: "text" | "number";
   dir?: "rtl" | "ltr";
+  type?: "text" | "number";
 }) {
   return (
-    <label className="grid gap-1">
-      <span className="text-xs font-black text-muted-foreground">{label}</span>
+    <label className="block">
+      <span className="text-[11px] font-black text-muted-foreground">
+        {label}
+      </span>
 
       <input
-        type={type}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
+        type={type}
         dir={dir}
-        className="h-11 rounded-[1.3rem] bg-white/60 px-4 text-sm font-bold text-foreground outline-none placeholder:text-muted-foreground/60 focus:bg-white/80 dark:bg-white/[0.05] dark:focus:bg-white/[0.07]"
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full rounded-[1.25rem] bg-white/65 px-4 text-sm font-bold text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:bg-white dark:bg-white/[0.05]"
       />
     </label>
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  dir = "rtl",
+function getWorkflowSteps({
+  hasBasket,
+  hasValidationError,
+  hasPayload,
+  hasResponse,
+  isSubmitting,
 }: {
-  label: string;
-  value: string;
-  dir?: "rtl" | "ltr";
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-[1.2rem] bg-white/45 px-3 py-2 dark:bg-white/[0.04]">
-      <span className="shrink-0 text-xs font-black text-muted-foreground">
-        {label}
-      </span>
-
-      <span
-        dir={dir}
-        className="truncate text-xs font-black text-foreground"
-      >
-        {value}
-      </span>
-    </div>
-  );
+  hasBasket: boolean;
+  hasValidationError: boolean;
+  hasPayload: boolean;
+  hasResponse: boolean;
+  isSubmitting: boolean;
+}): OrderWorkflowStep[] {
+  return [
+    {
+      id: "context",
+      title: "بررسی سفارش",
+      description: "token، user و مبلغ اولیه",
+      status: "done",
+    },
+    {
+      id: "basket",
+      title: "سبد جدید",
+      description: "محصولات نهایی اسنپ",
+      status: hasBasket ? "done" : "current",
+    },
+    {
+      id: "validation",
+      title: "کنترل مبلغ",
+      description: "خطاها و هشدارها",
+      status: hasValidationError ? "warning" : hasBasket ? "done" : "todo",
+    },
+    {
+      id: "payload",
+      title: "Preview Payload",
+      description: "کنترل نهایی قبل ارسال",
+      status: hasPayload && !hasValidationError ? "done" : "todo",
+    },
+    {
+      id: "submit",
+      title: "ثبت نتیجه",
+      description: "sync / manual review",
+      status: hasResponse ? "done" : isSubmitting ? "current" : "todo",
+    },
+  ];
 }
 
-function WarningBox({ text }: { text: string }) {
-  return (
-    <div className="mt-3 rounded-[1.4rem] bg-amber-500/10 px-4 py-3 text-xs font-black leading-6 text-amber-700 dark:text-amber-300">
-      {text}
-    </div>
-  );
-}
+function getCurrentStepLabel(steps: OrderWorkflowStep[]) {
+  const current =
+    steps.find((step) => step.status === "current") ??
+    steps.find((step) => step.status === "warning") ??
+    steps.find((step) => step.status === "todo") ??
+    steps[steps.length - 1];
 
-function ErrorBox({ text }: { text: string }) {
-  return (
-    <div className="mt-3 rounded-[1.4rem] bg-rose-500/10 px-4 py-3 text-xs font-black leading-6 text-rose-700 dark:text-rose-300">
-      {text}
-    </div>
-  );
-}
-
-function buildInitialSnappBasket(order: SalesOrder): SnappBasketDraftItem[] {
-  const sourceProducts = order.exchangeInfo?.replacementProducts?.length
-    ? order.exchangeInfo.replacementProducts
-    : order.products;
-
-  return sourceProducts.map(createDraftItemFromProduct);
-}
-
-function createDraftItemFromProduct(
-  product: SalesOrderProduct
-): SnappBasketDraftItem {
-  const unitAmountToman = estimateProductUnitAmountToman(product);
-
-  return {
-    id: `product-${product.id}`,
-    sourceProductId: product.id,
-    productCode: product.productCode,
-    snappProductId: buildSnappProductId({
-      productCode: product.productCode,
-      color: product.color,
-      size: product.size,
-    }),
-    name: product.title,
-    category: "پوشاک",
-    color: product.color,
-    size: product.size,
-    count: product.quantity,
-    unitAmountRial: unitAmountToman * 10,
-  };
-}
-
-function buildSnappProductId({
-  productCode,
-  color,
-  size,
-}: {
-  productCode: string;
-  color?: string;
-  size?: string;
-}) {
-  const codePart = onlyDigits(productCode).padStart(2, "0");
-  const colorPart = stableTwoDigitCode(color || "00");
-  const sizePart = stableThreeDigitCode(size || "000");
-
-  return `${codePart}${colorPart}${sizePart}`;
-}
-
-function stableTwoDigitCode(value: string) {
-  const digits = onlyDigits(value);
-
-  if (digits) return digits.padStart(2, "0").slice(-2);
-
-  return String(hashText(value) % 100).padStart(2, "0");
-}
-
-function stableThreeDigitCode(value: string) {
-  const digits = onlyDigits(value);
-
-  if (digits) return digits.padStart(3, "0").slice(-3);
-
-  return String(hashText(value) % 1000).padStart(3, "0");
-}
-
-function hashText(value: string) {
-  return value.split("").reduce((hash, char) => {
-    return hash + char.charCodeAt(0);
-  }, 0);
-}
-
-function onlyDigits(value: string) {
-  return String(value || "").replace(/\D/g, "");
-}
-
-function toNumberFromText(value: string) {
-  const normalized = String(value || "").replace(/[^\d]/g, "");
-
-  return Number(normalized || 0);
-}
-
-function estimateProductUnitAmountToman(product: SalesOrderProduct) {
-  const maybeProduct = product as SalesOrderProduct & {
-    unitPrice?: number;
-    price?: number;
-    finalPrice?: number;
-    payableAmount?: number;
-  };
-
-  return Number(
-    maybeProduct.finalPrice ||
-      maybeProduct.payableAmount ||
-      maybeProduct.unitPrice ||
-      maybeProduct.price ||
-      0
-  );
-}
-
-function getOrderPayableAmountToman(order: SalesOrder) {
-  const maybeOrder = order as SalesOrder & {
-    payableAmount?: number;
-    totalAmount?: number;
-    paidAmount?: number;
-  };
-
-  return Number(
-    maybeOrder.payableAmount ||
-      maybeOrder.paidAmount ||
-      order.payment.paidAmount ||
-      maybeOrder.totalAmount ||
-      0
-  );
-}
-
-function getOrderPaymentToken(order: SalesOrder) {
-  const maybeOrder = order as SalesOrder & {
-    paymentToken?: string;
-    payment_token?: string;
-    snappPaymentToken?: string;
-  };
-
-  const maybeExternalSync = order.externalSync as
-    | {
-        paymentToken?: string;
-        payment_token?: string;
-      }
-    | undefined;
-
-  return (
-    maybeOrder.paymentToken ||
-    maybeOrder.payment_token ||
-    maybeOrder.snappPaymentToken ||
-    maybeExternalSync?.paymentToken ||
-    maybeExternalSync?.payment_token ||
-    `mock-snapp-token-${order.id}`
-  );
-}
-
-function getOrderUserId(order: SalesOrder) {
-  const maybeOrder = order as SalesOrder & {
-    userId?: number | string;
-    userID?: number | string;
-    customerId?: number | string;
-  };
-
-  return maybeOrder.userId || maybeOrder.userID || maybeOrder.customerId || order.id;
-}
-
-function isSnappOrder(order: SalesOrder) {
-  return (
-    order.payment.gateway === "snapp_pay" ||
-    order.externalSync?.provider === "snapp_pay"
-  );
+  return current?.title ?? "در حال بررسی";
 }

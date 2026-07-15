@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+
 const stats = [
   {
     label: "تعداد کاربران",
@@ -125,6 +126,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
+      
 
       <section className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
         <div className="glass-panel overflow-hidden rounded-[2rem]">

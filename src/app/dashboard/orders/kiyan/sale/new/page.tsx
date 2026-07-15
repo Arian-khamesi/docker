@@ -1,827 +1,1181 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
-import type { LucideIcon } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import {
-  AlertTriangle,
   ArrowLeft,
   BadgeDollarSign,
-  CheckCircle2,
-  ClipboardCheck,
+  Calculator,
   CreditCard,
-  FileWarning,
-  PackageCheck,
+  Database,
+  FileCode2,
+  Minus,
+  PackagePlus,
+  Plus,
   ReceiptText,
-  Repeat2,
-  RotateCcw,
-  Search,
-  Smartphone,
+  RefreshCw,
+  Save,
+  ShoppingBag,
+  Trash2,
 } from "lucide-react";
 
 import {
+  SALES_ORDERS_BASE_PATH,
   getSalesOrderDetailPath,
-  getSalesOrderExchangeCreatePath,
-  getSalesOrderKiyanSaleCreatePath,
-  getSalesOrderReturnCreatePath,
 } from "@/components/sales/orders/sales-orders.constants";
-import { OrdersWorkspaceShell } from "@/components/sales/orders/workspaces/orders-workspace-shell";
-import { getGatewayLabel, getStatusLabel } from "@/lib/orders/order-labels";
+import { OrderNotFound } from "@/components/sales/orders/detail/order-detail-core-sections";
+import { ProductVariantSelector } from "@/components/sales/orders/products/product-variant-selector";
+import {
+  OrderWorkflowSection,
+  OrderWorkflowShell,
+  OrderWorkflowStepper,
+  WorkflowInfoCard,
+  WorkflowPayloadPreview,
+  WorkflowResultBox,
+  type OrderWorkflowStep,
+} from "@/components/sales/orders/ux/order-workflow-shell";
+import { mockProductVariantCatalog } from "@/data/mock-product-variants";
 import { useSalesOrdersStore } from "@/store/sales-orders.store";
-import type { SalesOrder } from "@/types/sales-order";
+import type { ProductVariantSelection } from "@/types/product-variant";
+import type { SalesOrder, SalesOrderProduct } from "@/types/sales-order";
 
-type KiyanTaskType =
-  | "primary_sale"
-  | "return_document"
-  | "exchange_document"
-  | "snapp_sync"
-  | "financial_review"
-  | "follow_up";
+type KiyanTenderId = "1" | "621" | "1247" | "1015" | "399" | "125" | "126";
 
-type KiyanTaskSeverity = "rose" | "amber" | "sky" | "violet" | "emerald";
-
-type TaskFilter = KiyanTaskType | "all";
-
-type GatewayFilter =
-  | "all"
-  | "saman"
-  | "mellat"
-  | "snapp_pay"
-  | "medisa"
-  | "wallet"
-  | "unknown";
-
-interface KiyanTask {
+interface KiyanSaleItemDraft {
   id: string;
-  type: KiyanTaskType;
+  parentProductCode: string;
+  variantBarcode: string;
   title: string;
-  description: string;
-  severity: KiyanTaskSeverity;
-  actionLabel: string;
-  actionHref: string;
+  color?: string;
+  size?: string;
+  kiyanItemId: string;
+  quantity: number;
+  priceToman: number;
+  discountToman: number;
 }
 
-interface KiyanOperationOrder {
-  order: SalesOrder;
-  tasks: KiyanTask[];
+interface KiyanPaymentDraft {
+  id: string;
+  tenderId: KiyanTenderId;
+  title: string;
+  amountToman: number;
+  serialNumber: string;
 }
 
-export default function KiyanOperationsCenterPage() {
-  const { orders } = useSalesOrdersStore();
+interface KiyanSalePayload {
+  uniqueInfo: string;
+  customerId: string;
+  saleTransactionItemInformation: {
+    itemId: number;
+    quantity: number;
+    price: number;
+    priceWithDiscount: number;
+    tax: number;
+    charge: number;
+    workerId: number;
+    isCancel: boolean;
+  }[];
+  paymentInformation: {
+    tenderId: string;
+    paymentAmount: number;
+    discountedAmount: number;
+    rrn: string;
+    stan: string;
+    cardNumber: string;
+    hashedCardNumber: string;
+    customerIdentifier: string;
+    terminalCode: string;
+    serialNumber: string;
+    giftCardPassword: string;
+  }[];
+}
 
-  const [query, setQuery] = useState("");
-  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
-  const [gatewayFilter, setGatewayFilter] = useState<GatewayFilter>("all");
+interface KiyanMockResponse {
+  success: boolean;
+  saleReceiptBarcode?: string;
+  message: string;
+}
 
-  const operationOrders = useMemo<KiyanOperationOrder[]>(() => {
-    return orders
-      .map((order) => ({
+const TENDER_OPTIONS: { id: KiyanTenderId; title: string; description: string }[] =
+  [
+    {
+      id: "1",
+      title: "نقد",
+      description: "پرداخت نقدی / عمومی",
+    },
+    {
+      id: "621",
+      title: "سامان",
+      description: "درگاه سامان",
+    },
+    {
+      id: "1247",
+      title: "مدیسه",
+      description: "پرداخت مدیسه",
+    },
+    {
+      id: "1015",
+      title: "اسنپ",
+      description: "SnappPay",
+    },
+    {
+      id: "399",
+      title: "اعتبار",
+      description: "اعتبار مشتری",
+    },
+    {
+      id: "125",
+      title: "تخفیف درصدی",
+      description: "تخفیف درصدی",
+    },
+    {
+      id: "126",
+      title: "بن ریالی",
+      description: "تخفیف مبلغی / بن",
+    },
+  ];
+
+export default function KiyanSaleWorkflowPage() {
+  const params = useParams<{ id: string }>();
+  const orderId = params.id;
+  const numericOrderId = Number(orderId);
+
+  const orders = useSalesOrdersStore((state) => state.orders);
+  const updatePrimaryKiyanInvoice = useSalesOrdersStore(
+    (state) => state.updatePrimaryKiyanInvoice
+  );
+  const markOrderNeedsFollowUp = useSalesOrdersStore(
+    (state) => state.markOrderNeedsFollowUp
+  );
+
+  const order = useMemo(
+    () => orders.find((item) => item.id === numericOrderId),
+    [numericOrderId, orders]
+  );
+
+  const [customerId, setCustomerId] = useState(() =>
+    order ? getDefaultCustomerId(order) : ""
+  );
+
+  const [uniqueInfo, setUniqueInfo] = useState(() =>
+    order ? `${order.id}-${getDefaultCustomerId(order)}` : ""
+  );
+
+  const [saleItems, setSaleItems] = useState<KiyanSaleItemDraft[]>(() =>
+    order ? createInitialSaleItems(order) : []
+  );
+
+  const [payments, setPayments] = useState<KiyanPaymentDraft[]>(() =>
+    order ? createInitialPayments(order) : []
+  );
+
+  const [selectedVariant, setSelectedVariant] =
+    useState<ProductVariantSelection | null>(null);
+  const [selectedVariantCount, setSelectedVariantCount] = useState("1");
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [response, setResponse] = useState<KiyanMockResponse | null>(null);
+
+  const payload = useMemo(
+    () =>
+      buildKiyanSalePayload({
+        uniqueInfo,
+        customerId,
+        saleItems,
+        payments,
+      }),
+    [customerId, payments, saleItems, uniqueInfo]
+  );
+
+  const validation = useMemo(
+    () =>
+      validateKiyanSaleWorkflow({
         order,
-        tasks: getKiyanTasks(order),
-      }))
-      .filter((item) => item.tasks.length > 0);
-  }, [orders]);
+        uniqueInfo,
+        customerId,
+        saleItems,
+        payments,
+      }),
+    [customerId, order, payments, saleItems, uniqueInfo]
+  );
 
-  const filteredOrders = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+  if (!order) {
+    return <OrderNotFound orderId={orderId} />;
+  }
 
-    return operationOrders
-      .filter((item) => {
-        if (taskFilter !== "all") {
-          if (!item.tasks.some((task) => task.type === taskFilter)) {
-            return false;
-          }
-        }
+  const steps = getWorkflowSteps({
+    hasItems: saleItems.length > 0,
+    hasPayments: payments.length > 0,
+    hasValidationError: validation.errors.length > 0,
+    hasResponse: Boolean(response),
+    isSubmitting,
+  });
 
-        if (gatewayFilter !== "all") {
-          if (item.order.payment.gateway !== gatewayFilter) {
-            return false;
-          }
-        }
+  const itemsTotal = getSaleItemsTotal(saleItems);
+  const paymentsTotal = getPaymentsTotal(payments);
 
-        if (!normalizedQuery) return true;
+  function updateSaleItem(
+    itemId: string,
+    patch: Partial<KiyanSaleItemDraft>
+  ) {
+    setSaleItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      )
+    );
+  }
 
-        return buildKiyanSearchText(item.order, item.tasks).includes(
-          normalizedQuery
-        );
-      })
-      .sort((a, b) => {
-        const aScore = getOperationPriorityScore(a.tasks);
-        const bScore = getOperationPriorityScore(b.tasks);
+  function removeSaleItem(itemId: string) {
+    setSaleItems((current) => current.filter((item) => item.id !== itemId));
+  }
 
-        if (aScore !== bScore) return bScore - aScore;
+  function addSelectedVariantToItems() {
+    if (!selectedVariant) return;
 
-        return (
-          new Date(b.order.createdAt).getTime() -
-          new Date(a.order.createdAt).getTime()
-        );
-      });
-  }, [gatewayFilter, operationOrders, query, taskFilter]);
+    const count = Math.max(1, Number(selectedVariantCount || 1));
 
-  const stats = useMemo(() => {
-    const allTasks = operationOrders.flatMap((item) => item.tasks);
-
-    return {
-      totalOrders: operationOrders.length,
-      primaryMissing: allTasks.filter((task) => task.type === "primary_sale")
-        .length,
-      documentMissing: allTasks.filter(
-        (task) =>
-          task.type === "return_document" ||
-          task.type === "exchange_document"
-      ).length,
-      snappSync: allTasks.filter((task) => task.type === "snapp_sync").length,
-      financialReview: allTasks.filter(
-        (task) => task.type === "financial_review"
-      ).length,
-      followUp: allTasks.filter((task) => task.type === "follow_up").length,
+    const newItem: KiyanSaleItemDraft = {
+      id: `variant-${selectedVariant.variantBarcode}`,
+      parentProductCode: selectedVariant.parentProductCode,
+      variantBarcode: selectedVariant.variantBarcode,
+      title: selectedVariant.parentProductTitle,
+      color: selectedVariant.colorTitle,
+      size: selectedVariant.sizeTitle,
+      kiyanItemId: getDefaultKiyanItemId(selectedVariant.variantBarcode),
+      quantity: count,
+      priceToman: selectedVariant.priceToman,
+      discountToman: 0,
     };
-  }, [operationOrders]);
+
+    setSaleItems((current) => {
+      const existing = current.find(
+        (item) => item.variantBarcode === selectedVariant.variantBarcode
+      );
+
+      if (!existing) return [...current, newItem];
+
+      return current.map((item) =>
+        item.id === existing.id
+          ? {
+              ...item,
+              quantity: item.quantity + count,
+              priceToman: newItem.priceToman,
+            }
+          : item
+      );
+    });
+
+    setSelectedVariant(null);
+    setSelectedVariantCount("1");
+  }
+
+  function updatePayment(
+    paymentId: string,
+    patch: Partial<KiyanPaymentDraft>
+  ) {
+    setPayments((current) =>
+      current.map((payment) =>
+        payment.id === paymentId
+          ? {
+              ...payment,
+              ...patch,
+            }
+          : payment
+      )
+    );
+  }
+
+  function addPayment() {
+    setPayments((current) => [
+      ...current,
+      {
+        id: `payment-${Date.now()}`,
+        tenderId: "1",
+        title: "پرداخت جدید",
+        amountToman: 0,
+        serialNumber: "",
+      },
+    ]);
+  }
+
+  function removePayment(paymentId: string) {
+    setPayments((current) =>
+      current.filter((payment) => payment.id !== paymentId)
+    );
+  }
+
+  async function submitMockKiyanSale() {
+    if (!validation.isValid) return;
+
+    setIsSubmitting(true);
+    setResponse(null);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    const saleReceiptBarcode = `KYN-SALE-${order.id}-${Date.now()
+      .toString()
+      .slice(-6)}`;
+
+    updatePrimaryKiyanInvoice(order.id, saleReceiptBarcode);
+    markOrderNeedsFollowUp(
+      order.id,
+      false,
+      "فاکتور فروش کیان برای سفارش ثبت شد"
+    );
+
+    setResponse({
+      success: true,
+      saleReceiptBarcode,
+      message: "فروش کیان به‌صورت mock ثبت شد و barcode روی سفارش ذخیره شد.",
+    });
+
+    setIsSubmitting(false);
+  }
 
   return (
-    <OrdersWorkspaceShell
-      eyebrow="Kiyan Operations Center"
-      title="مرکز عملیات کیان"
-      description="نمای عملیاتی برای پیگیری سفارش‌های بدون فاکتور کیان، مرجوعی‌های بدون سند، تعویض‌های ناقص، مغایرت مالی و sync اسنپ."
-      icon={BadgeDollarSign}
-      tone="sky"
-      actionLabel="همه سفارشات"
-      actionHref="/dashboard/orders"
-      cards={[
-        {
-          label: "موارد عملیاتی",
-          value: stats.totalOrders.toLocaleString("fa-IR"),
-          description: "سفارش‌هایی که نیازمند اقدام هستند",
-        },
-        {
-          label: "فروش ثبت‌نشده",
-          value: stats.primaryMissing.toLocaleString("fa-IR"),
-          description: "پرداخت موفق ولی بدون فاکتور کیان",
-        },
-        {
-          label: "اسناد ناقص",
-          value: stats.documentMissing.toLocaleString("fa-IR"),
-          description: "مرجوعی یا تعویض بدون سند کامل",
-        },
-        {
-          label: "sync اسنپ",
-          value: stats.snappSync.toLocaleString("fa-IR"),
-          description: "نیازمند پیگیری سمت SnappPay",
-        },
-      ]}
-    >
-      <section className="rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <h2 className="text-lg font-black text-foreground">
-              صف کارهای کیان
-            </h2>
+    <main className="space-y-4">
+      <OrderWorkflowShell
+        eyebrow="Kiyan Sale"
+        title={`ثبت فروش کیان برای سفارش #${order.id}`}
+        description="این workflow برای ثبت فاکتور فروش اصلی سفارش در کیان است. آیتم‌ها باید با variant دقیق و شناسه قابل ارسال به کیان کنترل شوند."
+        orderLabel={`Order #${order.id}`}
+        tone="violet"
+        icon={BadgeDollarSign}
+        breadcrumb={[
+          {
+            label: "همه سفارشات",
+            href: SALES_ORDERS_BASE_PATH,
+          },
+          {
+            label: `سفارش #${order.id}`,
+            href: getSalesOrderDetailPath(order.id),
+          },
+          {
+            label: "ثبت فروش کیان",
+          },
+        ]}
+        goal="ساخت payload فروش کیان، کنترل آیتم‌ها و پرداخت‌ها، ثبت barcode فاکتور کیان."
+        currentStep={getCurrentStepLabel(steps)}
+        expectedResult="ثبت saleReceiptBarcode روی سفارش و خروج از صف سفارش‌های بدون کیان."
+        secondaryActions={[
+          {
+            label: "جزئیات سفارش",
+            href: getSalesOrderDetailPath(order.id),
+          },
+        ]}
+      >
+        <OrderWorkflowStepper steps={steps} />
 
-            <p className="mt-2 text-sm leading-7 text-muted-foreground">
-              این صفحه خودش عملیات انجام نمی‌دهد؛ فقط سفارش‌هایی را که برای
-              کیان، اسنپ یا مغایرت مالی نیازمند اقدام هستند، یک‌جا جمع می‌کند.
-            </p>
+        <OrderWorkflowSection
+          title="۱. Context سفارش"
+          description="قبل از ساخت payload، اطلاعات پایه سفارش، مشتری و وضعیت فعلی فاکتور کیان را بررسی کن."
+          variant="context"
+          icon={Database}
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <WorkflowInfoCard
+              label="شماره سفارش"
+              value={`#${order.id}`}
+              tone="violet"
+            />
+
+            <WorkflowInfoCard
+              label="مشتری"
+              value={order.customer.fullName}
+              tone="slate"
+            />
+
+            <WorkflowInfoCard
+              label="مبلغ سفارش"
+              value={`${order.payableAmount.toLocaleString("fa-IR")} تومان`}
+              tone="emerald"
+            />
+
+            <WorkflowInfoCard
+              label="فاکتور فعلی کیان"
+              value={order.kiyanInvoice.code ?? "ثبت نشده"}
+              tone={order.kiyanInvoice.code ? "emerald" : "rose"}
+            />
           </div>
 
-          <div className="grid gap-2 md:grid-cols-[280px_210px_170px]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <WorkflowInput
+              label="Customer ID کیان"
+              value={customerId}
+              onChange={setCustomerId}
+              dir="ltr"
+            />
 
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="جستجو سفارش، مشتری، موبایل، بارکد..."
-                className="h-12 w-full rounded-[1.4rem] bg-white/60 pr-11 pl-4 text-sm font-bold text-foreground outline-none placeholder:text-muted-foreground/70 focus:bg-white/80 dark:bg-white/[0.05] dark:focus:bg-white/[0.07]"
+            <WorkflowInput
+              label="Unique Info"
+              value={uniqueInfo}
+              onChange={setUniqueInfo}
+              dir="ltr"
+            />
+          </div>
+        </OrderWorkflowSection>
+
+        <OrderWorkflowSection
+          title="۲. آیتم‌های فروش کیان"
+          description="اینجا کالاهای قابل ارسال به کیان کنترل می‌شوند. کد پدر و barcode variant باید تفکیک شده باشند."
+          variant="input"
+          icon={ShoppingBag}
+        >
+          <div className="grid gap-3">
+            {saleItems.length ? (
+              saleItems.map((item) => (
+                <KiyanSaleItemEditor
+                  key={item.id}
+                  item={item}
+                  onChange={(patch) => updateSaleItem(item.id, patch)}
+                  onRemove={() => removeSaleItem(item.id)}
+                />
+              ))
+            ) : (
+              <WorkflowResultBox
+                type="warning"
+                title="آیتم فروش وجود ندارد"
+                message="برای ثبت فروش کیان باید حداقل یک آیتم در payload وجود داشته باشد."
               />
+            )}
+          </div>
+
+          <div className="mt-4 rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-700 dark:text-violet-300">
+                <PackagePlus className="h-5 w-5" />
+              </div>
+
+              <div>
+                <h3 className="text-sm font-black text-foreground">
+                  افزودن آیتم از کاتالوگ variant
+                </h3>
+
+                <p className="mt-1 text-xs font-bold leading-6 text-muted-foreground">
+                  محصول مادر، رنگ و سایز انتخاب می‌شوند و barcode یونیک همان
+                  variant به آیتم فروش اضافه می‌شود.
+                </p>
+              </div>
             </div>
 
-            <select
-              value={taskFilter}
-              onChange={(event) =>
-                setTaskFilter(event.target.value as TaskFilter)
-              }
-              className="h-12 rounded-[1.4rem] bg-white/60 px-4 text-sm font-black text-foreground outline-none dark:bg-white/[0.05]"
-            >
-              <option value="all">همه عملیات‌ها</option>
-              <option value="primary_sale">فروش کیان ثبت‌نشده</option>
-              <option value="return_document">مرجوعی بدون سند</option>
-              <option value="exchange_document">تعویض ناقص کیان</option>
-              <option value="snapp_sync">sync اسنپ</option>
-              <option value="financial_review">مغایرت مالی</option>
-              <option value="follow_up">پیگیری عمومی</option>
-            </select>
+            <ProductVariantSelector
+              products={mockProductVariantCatalog}
+              value={selectedVariant}
+              onChange={setSelectedVariant}
+              title="انتخاب کالای دقیق برای فروش کیان"
+              description="کالای دقیق باید بر اساس رنگ و سایز مشخص شود. barcode نهایی variant مبنای تشخیص کالا است."
+            />
 
-            <select
-              value={gatewayFilter}
-              onChange={(event) =>
-                setGatewayFilter(event.target.value as GatewayFilter)
-              }
-              className="h-12 rounded-[1.4rem] bg-white/60 px-4 text-sm font-black text-foreground outline-none dark:bg-white/[0.05]"
-            >
-              <option value="all">همه درگاه‌ها</option>
-              <option value="saman">سامان</option>
-              <option value="mellat">ملت</option>
-              <option value="snapp_pay">اسنپ‌پی</option>
-              <option value="medisa">مدیسه</option>
-              <option value="wallet">اعتبار / کیف پول</option>
-              <option value="unknown">نامشخص</option>
-            </select>
+            <div className="mt-4 grid gap-3 md:grid-cols-[240px_1fr]">
+              <WorkflowInput
+                label="تعداد برای افزودن"
+                value={selectedVariantCount}
+                onChange={setSelectedVariantCount}
+                dir="ltr"
+                type="number"
+              />
+
+              <div className="flex flex-col justify-end">
+                <button
+                  type="button"
+                  onClick={addSelectedVariantToItems}
+                  disabled={!selectedVariant}
+                  className={[
+                    "inline-flex h-11 items-center justify-center gap-2 rounded-[1.3rem] px-5 text-xs font-black text-white transition",
+                    selectedVariant
+                      ? "bg-violet-600 hover:-translate-y-0.5"
+                      : "cursor-not-allowed bg-slate-400",
+                  ].join(" ")}
+                >
+                  <Plus className="h-4 w-4" />
+                  افزودن به آیتم‌های کیان
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+        </OrderWorkflowSection>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <MiniStat
-            icon={ReceiptText}
-            label="فروش ثبت‌نشده"
-            value={stats.primaryMissing.toLocaleString("fa-IR")}
-            tone="amber"
-          />
-
-          <MiniStat
-            icon={RotateCcw}
-            label="مرجوعی بدون سند"
-            value={countTasks(operationOrders, "return_document").toLocaleString(
-              "fa-IR"
-            )}
-            tone="rose"
-          />
-
-          <MiniStat
-            icon={Repeat2}
-            label="تعویض ناقص"
-            value={countTasks(
-              operationOrders,
-              "exchange_document"
-            ).toLocaleString("fa-IR")}
-            tone="violet"
-          />
-
-          <MiniStat
-            icon={Smartphone}
-            label="sync اسنپ"
-            value={stats.snappSync.toLocaleString("fa-IR")}
-            tone="sky"
-          />
-
-          <MiniStat
-            icon={FileWarning}
-            label="مغایرت مالی"
-            value={stats.financialReview.toLocaleString("fa-IR")}
-            tone="rose"
-          />
-        </div>
-      </section>
-
-      <section className="grid gap-3">
-        {filteredOrders.length ? (
-          filteredOrders.map((item) => (
-            <KiyanOperationCard
-              key={item.order.id}
-              order={item.order}
-              tasks={item.tasks}
-            />
-          ))
-        ) : (
-          <EmptyState
-            hasAnyOperation={operationOrders.length > 0}
-            hasQuery={Boolean(query.trim())}
-          />
-        )}
-      </section>
-    </OrdersWorkspaceShell>
-  );
-}
-
-function KiyanOperationCard({
-  order,
-  tasks,
-}: {
-  order: SalesOrder;
-  tasks: KiyanTask[];
-}) {
-  const primaryTask = tasks[0];
-
-  return (
-    <article className="group rounded-[2rem] bg-white/55 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/70 dark:bg-white/[0.04] dark:hover:bg-white/[0.06]">
-      <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr_1fr_auto] xl:items-start">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={getSalesOrderDetailPath(order.id)}
-              className="text-base font-black text-foreground transition hover:text-sky-700 dark:hover:text-sky-300"
-            >
-              سفارش #{order.id}
-            </Link>
-
-            <PrimaryKiyanPill order={order} />
-
-            {order.needsFollowUp ? (
-              <span className="rounded-full bg-rose-500/10 px-3 py-1 text-[11px] font-black text-rose-700 dark:text-rose-300">
-                پیگیری باز
-              </span>
-            ) : null}
-
-            {order.payment.gateway === "snapp_pay" ? (
-              <span className="rounded-full bg-sky-500/10 px-3 py-1 text-[11px] font-black text-sky-700 dark:text-sky-300">
-                SnappPay
-              </span>
-            ) : null}
-          </div>
-
-          <p className="mt-2 text-sm font-bold text-muted-foreground">
-            {order.customer.fullName} · {order.customer.mobile} ·{" "}
-            {order.customer.city}
-          </p>
-
-          <p className="mt-1 text-xs font-bold text-muted-foreground">
-            وضعیت سفارش: {getStatusLabel(order.status)} · درگاه:{" "}
-            {getGatewayLabel(order.payment.gateway)} · مبلغ:{" "}
-            {order.payableAmount.toLocaleString("fa-IR")} تومان
-          </p>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <SoftChip
-              label="پرداخت"
-              value={isPaymentSuccess(order) ? "موفق" : "ناموفق / ناقص"}
-            />
-
-            <SoftChip
-              label="تاریخ"
-              value={formatDate(order.createdAt)}
-            />
-
-            <SoftChip
-              label="تعداد عملیات"
-              value={`${tasks.length.toLocaleString("fa-IR")} مورد`}
-            />
-          </div>
-        </div>
-
-        <div className="rounded-[1.5rem] bg-white/45 p-3 dark:bg-white/[0.04]">
-          <h3 className="flex items-center gap-2 text-sm font-black text-foreground">
-            <ClipboardCheck className="h-4 w-4 text-sky-700 dark:text-sky-300" />
-            وضعیت اسناد کیان
-          </h3>
-
-          <div className="mt-3 grid gap-2">
-            <InfoRow
-              label="فروش اصلی"
-              value={order.kiyanInvoice.code || "ثبت نشده"}
-              dir="ltr"
-            />
-
-            <InfoRow
-              label="مرجوعی"
-              value={
-                order.returnInfo?.returnKiyanBarcode ||
-                findKiyanDocumentBarcode(order, "return") ||
-                "ثبت نشده"
-              }
-              dir="ltr"
-            />
-
-            <InfoRow
-              label="برگشت تعویض"
-              value={
-                order.exchangeInfo?.returnKiyanBarcode ||
-                findKiyanDocumentBarcode(order, "return") ||
-                "ثبت نشده"
-              }
-              dir="ltr"
-            />
-
-            <InfoRow
-              label="فروش جایگزین"
-              value={order.exchangeInfo?.replacementKiyanBarcode || "ثبت نشده"}
-              dir="ltr"
-            />
-          </div>
-        </div>
-
-        <div className="rounded-[1.5rem] bg-white/45 p-3 dark:bg-white/[0.04]">
-          <h3 className="flex items-center gap-2 text-sm font-black text-foreground">
-            <PackageCheck className="h-4 w-4 text-sky-700 dark:text-sky-300" />
-            عملیات‌های لازم
-          </h3>
-
-          <div className="mt-3 grid gap-2">
-            {tasks.map((task) => (
-              <TaskRow key={task.id} task={task} />
+        <OrderWorkflowSection
+          title="۳. پرداخت‌ها و Tender"
+          description="جمع پرداخت‌ها باید با جمع آیتم‌های فروش هماهنگ باشد. مقدار paymentAmount در payload به ریال ارسال می‌شود."
+          variant="input"
+          icon={CreditCard}
+        >
+          <div className="grid gap-3">
+            {payments.map((payment) => (
+              <PaymentEditor
+                key={payment.id}
+                payment={payment}
+                onChange={(patch) => updatePayment(payment.id, patch)}
+                onRemove={() => removePayment(payment.id)}
+              />
             ))}
           </div>
-        </div>
 
-        <div className="flex flex-col gap-2 xl:min-w-[160px]">
-          <Link
-            href={primaryTask.actionHref}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-[1.3rem] bg-sky-600 px-4 text-xs font-black text-white shadow-[0_14px_32px_rgba(2,132,199,0.18)] transition hover:-translate-y-0.5"
+          <button
+            type="button"
+            onClick={addPayment}
+            className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-[1.3rem] bg-violet-600 px-5 text-xs font-black text-white transition hover:-translate-y-0.5"
           >
-            {primaryTask.actionLabel}
-          </Link>
+            <Plus className="h-4 w-4" />
+            افزودن پرداخت
+          </button>
+        </OrderWorkflowSection>
 
-          <Link
-            href={getSalesOrderDetailPath(order.id)}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-[1.3rem] bg-white/65 px-4 text-xs font-black text-foreground transition hover:-translate-y-0.5 dark:bg-white/[0.06]"
-          >
-            جزئیات
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function TaskRow({ task }: { task: KiyanTask }) {
-  const Icon = getTaskIcon(task.type);
-
-  return (
-    <div className="rounded-[1.2rem] bg-white/45 p-3 dark:bg-white/[0.04]">
-      <div className="flex items-start gap-2">
-        <div
-          className={[
-            "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl",
-            getSeverityClass(task.severity),
-          ].join(" ")}
+        <OrderWorkflowSection
+          title="۴. کنترل مبلغ و اعتبارسنجی"
+          description="قبل از ثبت کیان، آیتم‌ها، پرداخت‌ها، شناسه مشتری، uniqueInfo و اختلاف مبلغ باید کنترل شوند."
+          variant="validation"
+          icon={Calculator}
         >
-          <Icon className="h-4 w-4" />
+          <div className="grid gap-3 md:grid-cols-3">
+            <WorkflowInfoCard
+              label="جمع آیتم‌ها"
+              value={`${itemsTotal.toLocaleString("fa-IR")} تومان`}
+              tone="sky"
+            />
+
+            <WorkflowInfoCard
+              label="جمع پرداخت‌ها"
+              value={`${paymentsTotal.toLocaleString("fa-IR")} تومان`}
+              tone="violet"
+            />
+
+            <WorkflowInfoCard
+              label="اختلاف"
+              value={`${(paymentsTotal - itemsTotal).toLocaleString(
+                "fa-IR"
+              )} تومان`}
+              tone={paymentsTotal === itemsTotal ? "emerald" : "amber"}
+            />
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            {validation.errors.map((error) => (
+              <WorkflowResultBox
+                key={error}
+                type="error"
+                title="خطای اعتبارسنجی"
+                message={error}
+              />
+            ))}
+
+            {validation.warnings.map((warning) => (
+              <WorkflowResultBox
+                key={warning}
+                type="warning"
+                title="هشدار"
+                message={warning}
+              />
+            ))}
+
+            {validation.isValid ? (
+              <WorkflowResultBox
+                type="success"
+                title="Payload فروش کیان قابل ثبت است"
+                message="آیتم‌ها و پرداخت‌ها کنترل شده‌اند و امکان ثبت mock وجود دارد."
+              />
+            ) : null}
+          </div>
+        </OrderWorkflowSection>
+
+        <WorkflowPayloadPreview
+          payload={payload}
+          title="۵. Preview Payload فروش کیان"
+          description="این payload مطابق ساختار فروش کیان ساخته شده و قبل از ارسال باید کنترل شود."
+        />
+
+        <OrderWorkflowSection
+          title="۶. ثبت نتیجه فروش کیان"
+          description="در این مرحله فعلاً ثبت mock انجام می‌شود و barcode فاکتور فروش روی سفارش ذخیره می‌شود."
+          variant="submit"
+          icon={Save}
+        >
+          <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+            <div className="rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+              <p className="text-sm font-black text-foreground">
+                ثبت فروش کیان
+              </p>
+
+              <p className="mt-2 text-xs font-bold leading-6 text-muted-foreground">
+                بعد از ثبت موفق، سفارش دیگر به‌عنوان «پرداخت موفق بدون فاکتور
+                کیان» نمایش داده نمی‌شود.
+              </p>
+
+              <button
+                type="button"
+                disabled={!validation.isValid || isSubmitting}
+                onClick={submitMockKiyanSale}
+                className={[
+                  "mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[1.4rem] text-sm font-black text-white transition",
+                  validation.isValid && !isSubmitting
+                    ? "bg-emerald-600 hover:-translate-y-0.5"
+                    : "cursor-not-allowed bg-slate-400",
+                ].join(" ")}
+              >
+                {isSubmitting ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                ثبت mock فروش کیان
+              </button>
+
+              <Link
+                href={getSalesOrderDetailPath(order.id)}
+                className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-[1.3rem] bg-white/65 text-xs font-black text-foreground transition hover:-translate-y-0.5 dark:bg-white/[0.05]"
+              >
+                بازگشت به جزئیات سفارش
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </div>
+
+            <div>
+              {response ? (
+                <WorkflowResultBox
+                  type={response.success ? "success" : "error"}
+                  title={response.success ? "فروش کیان ثبت شد" : "ثبت ناموفق"}
+                  message={response.message}
+                  details={
+                    response.saleReceiptBarcode ? (
+                      <div
+                        dir="ltr"
+                        className="rounded-[1.2rem] bg-white/45 p-3 text-sm font-black dark:bg-white/[0.05]"
+                      >
+                        {response.saleReceiptBarcode}
+                      </div>
+                    ) : null
+                  }
+                />
+              ) : (
+                <WorkflowResultBox
+                  type="info"
+                  title="هنوز نتیجه‌ای ثبت نشده"
+                  message="بعد از کنترل payload، روی ثبت mock فروش کیان بزن."
+                />
+              )}
+            </div>
+          </div>
+        </OrderWorkflowSection>
+      </OrderWorkflowShell>
+    </main>
+  );
+}
+
+function KiyanSaleItemEditor({
+  item,
+  onChange,
+  onRemove,
+}: {
+  item: KiyanSaleItemDraft;
+  onChange: (patch: Partial<KiyanSaleItemDraft>) => void;
+  onRemove: () => void;
+}) {
+  const rowTotal = Math.max(0, item.priceToman - item.discountToman) * item.quantity;
+
+  return (
+    <div className="rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+      <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h3 className="text-sm font-black text-foreground">{item.title}</h3>
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="rounded-full bg-slate-500/10 px-3 py-1 text-[11px] font-black text-slate-700 dark:text-slate-300">
+              کد پدر: {item.parentProductCode}
+            </span>
+
+            <span
+              dir="ltr"
+              className="rounded-full bg-sky-500/10 px-3 py-1 text-[11px] font-black text-sky-700 dark:text-sky-300"
+            >
+              barcode: {item.variantBarcode}
+            </span>
+
+            {item.color ? (
+              <span className="rounded-full bg-violet-500/10 px-3 py-1 text-[11px] font-black text-violet-700 dark:text-violet-300">
+                رنگ: {item.color}
+              </span>
+            ) : null}
+
+            {item.size ? (
+              <span className="rounded-full bg-amber-500/10 px-3 py-1 text-[11px] font-black text-amber-700 dark:text-amber-300">
+                سایز: {item.size}
+              </span>
+            ) : null}
+          </div>
         </div>
 
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-black text-foreground">{task.title}</p>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-[1.2rem] bg-rose-500/10 px-3 text-xs font-black text-rose-700 dark:text-rose-300"
+        >
+          <Trash2 className="h-4 w-4" />
+          حذف
+        </button>
+      </div>
 
-          <p className="mt-1 text-[11px] font-bold leading-5 text-muted-foreground">
-            {task.description}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <WorkflowInput
+          label="شناسه آیتم کیان"
+          value={item.kiyanItemId}
+          onChange={(value) => onChange({ kiyanItemId: value })}
+          dir="ltr"
+          type="number"
+        />
+
+        <WorkflowInput
+          label="تعداد"
+          value={String(item.quantity)}
+          onChange={(value) =>
+            onChange({ quantity: Math.max(1, Number(value || 1)) })
+          }
+          dir="ltr"
+          type="number"
+        />
+
+        <WorkflowInput
+          label="قیمت واحد / تومان"
+          value={String(item.priceToman)}
+          onChange={(value) => onChange({ priceToman: Number(value || 0) })}
+          dir="ltr"
+          type="number"
+        />
+
+        <WorkflowInput
+          label="تخفیف واحد / تومان"
+          value={String(item.discountToman)}
+          onChange={(value) => onChange({ discountToman: Number(value || 0) })}
+          dir="ltr"
+          type="number"
+        />
+
+        <WorkflowInfoCard
+          label="جمع ردیف"
+          value={`${rowTotal.toLocaleString("fa-IR")} تومان`}
+          tone="emerald"
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            onChange({ quantity: Math.max(1, item.quantity - 1) })
+          }
+          className="inline-flex h-9 items-center justify-center rounded-[1.1rem] bg-white/65 px-3 text-xs font-black text-foreground dark:bg-white/[0.05]"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChange({ quantity: item.quantity + 1 })}
+          className="inline-flex h-9 items-center justify-center rounded-[1.1rem] bg-white/65 px-3 text-xs font-black text-foreground dark:bg-white/[0.05]"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PaymentEditor({
+  payment,
+  onChange,
+  onRemove,
+}: {
+  payment: KiyanPaymentDraft;
+  onChange: (patch: Partial<KiyanPaymentDraft>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-[1.7rem] bg-white/45 p-4 dark:bg-white/[0.04]">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-foreground">
+            {payment.title}
+          </h3>
+
+          <p className="mt-1 text-xs font-bold text-muted-foreground">
+            tenderId = {payment.tenderId}
           </p>
-
-          <Link
-            href={task.actionHref}
-            className="mt-2 inline-flex items-center gap-1 text-[11px] font-black text-sky-700 transition hover:opacity-80 dark:text-sky-300"
-          >
-            {task.actionLabel}
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </Link>
         </div>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-[1.2rem] bg-rose-500/10 px-3 text-xs font-black text-rose-700 dark:text-rose-300"
+        >
+          <Trash2 className="h-4 w-4" />
+          حذف
+        </button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <SelectInput
+          label="Tender"
+          value={payment.tenderId}
+          onChange={(value) => {
+            const option = TENDER_OPTIONS.find((item) => item.id === value);
+
+            onChange({
+              tenderId: value as KiyanTenderId,
+              title: option?.title ?? payment.title,
+            });
+          }}
+          options={TENDER_OPTIONS.map((item) => ({
+            value: item.id,
+            label: `${item.title} / ${item.id}`,
+          }))}
+        />
+
+        <WorkflowInput
+          label="عنوان"
+          value={payment.title}
+          onChange={(value) => onChange({ title: value })}
+        />
+
+        <WorkflowInput
+          label="مبلغ / تومان"
+          value={String(payment.amountToman)}
+          onChange={(value) => onChange({ amountToman: Number(value || 0) })}
+          dir="ltr"
+          type="number"
+        />
+
+        <WorkflowInput
+          label="Serial Number"
+          value={payment.serialNumber}
+          onChange={(value) => onChange({ serialNumber: value })}
+          dir="ltr"
+        />
       </div>
     </div>
   );
 }
 
-function EmptyState({
-  hasAnyOperation,
-  hasQuery,
-}: {
-  hasAnyOperation: boolean;
-  hasQuery: boolean;
-}) {
-  return (
-    <section className="rounded-[2rem] bg-white/55 p-8 text-center shadow-[0_14px_38px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.55)] backdrop-blur-xl dark:bg-white/[0.04]">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-700 dark:text-sky-300">
-        <CheckCircle2 className="h-7 w-7" />
-      </div>
-
-      <h2 className="mt-4 text-lg font-black text-foreground">
-        {hasAnyOperation
-          ? "موردی با این فیلتر پیدا نشد"
-          : "فعلاً عملیات باز برای کیان وجود ندارد"}
-      </h2>
-
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-7 text-muted-foreground">
-        {hasQuery
-          ? "عبارت جستجو یا فیلترها را تغییر بده."
-          : "وقتی سفارشی فاکتور کیان نداشته باشد یا مرجوعی/تعویض ناقص باشد، اینجا نمایش داده می‌شود."}
-      </p>
-    </section>
-  );
-}
-
-function MiniStat({
-  icon: Icon,
+function WorkflowInput({
   label,
   value,
-  tone,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  tone: "sky" | "amber" | "rose" | "emerald" | "violet";
-}) {
-  const toneClass = {
-    sky: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
-    amber: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    rose: "bg-rose-500/10 text-rose-700 dark:text-rose-300",
-    emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-    violet: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-  }[tone];
-
-  return (
-    <div className="flex items-center gap-3 rounded-[1.5rem] bg-white/45 p-3 dark:bg-white/[0.04]">
-      <div
-        className={`flex h-10 w-10 items-center justify-center rounded-2xl ${toneClass}`}
-      >
-        <Icon className="h-5 w-5" />
-      </div>
-
-      <div>
-        <p className="text-xs font-black text-muted-foreground">{label}</p>
-        <p className="mt-1 text-lg font-black text-foreground">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function PrimaryKiyanPill({ order }: { order: SalesOrder }) {
-  if (hasPrimaryKiyan(order)) {
-    return (
-      <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-black text-emerald-700 dark:text-emerald-300">
-        فروش کیان ثبت شده
-      </span>
-    );
-  }
-
-  if (isPaymentSuccess(order)) {
-    return (
-      <span className="rounded-full bg-amber-500/10 px-3 py-1 text-[11px] font-black text-amber-700 dark:text-amber-300">
-        بدون فاکتور کیان
-      </span>
-    );
-  }
-
-  return (
-    <span className="rounded-full bg-rose-500/10 px-3 py-1 text-[11px] font-black text-rose-700 dark:text-rose-300">
-      پرداخت ناموفق
-    </span>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
+  onChange,
   dir = "rtl",
+  type = "text",
 }: {
   label: string;
   value: string;
+  onChange: (value: string) => void;
   dir?: "rtl" | "ltr";
+  type?: "text" | "number";
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[1.1rem] bg-white/45 px-3 py-2 dark:bg-white/[0.04]">
-      <span className="shrink-0 text-[11px] font-black text-muted-foreground">
+    <label className="block">
+      <span className="text-[11px] font-black text-muted-foreground">
         {label}
       </span>
 
-      <span
+      <input
+        value={value}
+        type={type}
         dir={dir}
-        className={[
-          "truncate text-[11px] font-black text-foreground",
-          dir === "ltr" ? "text-left" : "text-right",
-        ].join(" ")}
-      >
-        {value}
-      </span>
-    </div>
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full rounded-[1.25rem] bg-white/65 px-4 text-sm font-bold text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:bg-white dark:bg-white/[0.05]"
+      />
+    </label>
   );
 }
 
-function SoftChip({ label, value }: { label: string; value: string }) {
+function SelectInput({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-white/55 px-3 py-1 text-[11px] font-black text-muted-foreground dark:bg-white/[0.05]">
-      {label}:
-      <strong className="text-foreground">{value}</strong>
-    </span>
+    <label className="block">
+      <span className="text-[11px] font-black text-muted-foreground">
+        {label}
+      </span>
+
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full rounded-[1.25rem] bg-white/65 px-4 text-sm font-bold text-foreground outline-none dark:bg-white/[0.05]"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
-function getKiyanTasks(order: SalesOrder): KiyanTask[] {
-  const tasks: KiyanTask[] = [];
-
-  const paymentSuccess = isPaymentSuccess(order);
-  const primaryKiyanExists = hasPrimaryKiyan(order);
-
-  if (paymentSuccess && !primaryKiyanExists) {
-    tasks.push({
-      id: `primary-sale-${order.id}`,
-      type: "primary_sale",
-      title: "فروش در کیان ثبت نشده",
-      description:
-        "پرداخت سفارش موفق است ولی فاکتور فروش اصلی در کیان ثبت نشده یا بارکد ندارد.",
-      severity: "amber",
-      actionLabel: "ثبت فروش کیان",
-      actionHref: getSalesOrderKiyanSaleCreatePath(order.id),
-    });
-  }
-
-  if (!paymentSuccess && primaryKiyanExists) {
-    tasks.push({
-      id: `financial-review-${order.id}`,
-      type: "financial_review",
-      title: "مغایرت پرداخت و کیان",
-      description:
-        "سفارش پرداخت موفق ندارد، اما برای آن فاکتور کیان ثبت شده است. نیازمند بررسی مالی یا اصلاح سند است.",
-      severity: "rose",
-      actionLabel: "بررسی جزئیات",
-      actionHref: getSalesOrderDetailPath(order.id),
-    });
-  }
-
-  const returnInfo = order.returnInfo;
-
-  if (
-    returnInfo &&
-    returnInfo.status !== "none" &&
-    returnInfo.status !== "cancelled" &&
-    !returnInfo.returnKiyanBarcode
-  ) {
-    tasks.push({
-      id: `return-document-${order.id}`,
-      type: "return_document",
-      title: "مرجوعی بدون سند کیان",
-      description:
-        "برای این سفارش مرجوعی ثبت شده، اما بارکد فاکتور مرجوعی کیان ذخیره نشده است.",
-      severity: "rose",
-      actionLabel: "ادامه مرجوعی",
-      actionHref: getSalesOrderReturnCreatePath(order.id),
-    });
-  }
-
-  const exchangeInfo = order.exchangeInfo;
-
-  if (
-    exchangeInfo &&
-    exchangeInfo.status !== "none" &&
-    exchangeInfo.status !== "cancelled" &&
-    (!exchangeInfo.returnKiyanBarcode ||
-      !exchangeInfo.replacementKiyanBarcode)
-  ) {
-    const missingParts = [
-      !exchangeInfo.returnKiyanBarcode ? "سند برگشت" : null,
-      !exchangeInfo.replacementKiyanBarcode ? "فروش جایگزین" : null,
-    ]
-      .filter(Boolean)
-      .join(" و ");
-
-    tasks.push({
-      id: `exchange-document-${order.id}`,
-      type: "exchange_document",
-      title: "تعویض ناقص در کیان",
-      description: `${missingParts} برای تعویض کامل نشده یا بارکد آن ذخیره نشده است.`,
-      severity: "violet",
-      actionLabel: "ادامه تعویض",
-      actionHref: getSalesOrderExchangeCreatePath(order.id),
-    });
-  }
-
-  if (isSnappSyncRequired(order)) {
-    tasks.push({
-      id: `snapp-sync-${order.id}`,
-      type: "snapp_sync",
-      title: "نیازمند sync اسنپ",
-      description:
-        "سفارش با SnappPay مرتبط است و بعد از ثبت کیان، باید وضعیت کالا/مبلغ در اسنپ بررسی یا sync شود.",
-      severity: "sky",
-      actionLabel: "بررسی جزئیات",
-      actionHref: getSalesOrderDetailPath(order.id),
-    });
-  }
-
-  if (order.needsFollowUp && tasks.length === 0) {
-    tasks.push({
-      id: `follow-up-${order.id}`,
-      type: "follow_up",
-      title: "پیگیری باز",
-      description:
-        "این سفارش نیازمند پیگیری علامت خورده، ولی نوع عملیات دقیق آن از وضعیت کیان مشخص نیست.",
-      severity: "amber",
-      actionLabel: "بررسی جزئیات",
-      actionHref: getSalesOrderDetailPath(order.id),
-    });
-  }
-
-  return tasks;
+function createInitialSaleItems(order: SalesOrder): KiyanSaleItemDraft[] {
+  return order.products.map((product) => createSaleItemFromOrderProduct(product));
 }
 
-function isPaymentSuccess(order: SalesOrder) {
-  return order.payment.statusCode === 100 || order.status === "payment_success";
+function createSaleItemFromOrderProduct(
+  product: SalesOrderProduct
+): KiyanSaleItemDraft {
+  const variantBarcode = product.barcode || product.productCode;
+
+  return {
+    id: product.id,
+    parentProductCode: product.productCode,
+    variantBarcode,
+    title: product.title,
+    color: product.color,
+    size: product.size,
+    kiyanItemId: getDefaultKiyanItemId(variantBarcode),
+    quantity: product.quantity,
+    priceToman: 0,
+    discountToman: 0,
+  };
 }
 
-function hasPrimaryKiyan(order: SalesOrder) {
-  return order.kiyanInvoice.status === "created" || Boolean(order.kiyanInvoice.code);
+function createInitialPayments(order: SalesOrder): KiyanPaymentDraft[] {
+  return [
+    {
+      id: `payment-${order.id}`,
+      tenderId: getDefaultTenderId(order),
+      title: getDefaultTenderTitle(order),
+      amountToman: order.payableAmount,
+      serialNumber: order.payment.trackingCode ?? "",
+    },
+  ];
 }
 
-function isSnappSyncRequired(order: SalesOrder) {
-  const returnNeedsSync =
-    order.payment.gateway === "snapp_pay" &&
-    order.returnInfo?.status === "kiyan_return_registered";
-
-  const exchangeNeedsSync =
-    order.payment.gateway === "snapp_pay" &&
-    order.exchangeInfo?.status === "kiyan_exchange_registered";
-
-  const externalSyncNeedsReview =
-    order.externalSync?.status === "pending" ||
-    order.externalSync?.status === "failed" ||
-    order.externalSync?.status === "manual_review";
-
-  return Boolean(returnNeedsSync || exchangeNeedsSync || externalSyncNeedsReview);
+function buildKiyanSalePayload({
+  uniqueInfo,
+  customerId,
+  saleItems,
+  payments,
+}: {
+  uniqueInfo: string;
+  customerId: string;
+  saleItems: KiyanSaleItemDraft[];
+  payments: KiyanPaymentDraft[];
+}): KiyanSalePayload {
+  return {
+    uniqueInfo,
+    customerId,
+    saleTransactionItemInformation: saleItems.map((item) => ({
+      itemId: Number(item.kiyanItemId || 0),
+      quantity: item.quantity,
+      price: item.priceToman,
+      priceWithDiscount: Math.max(0, item.priceToman - item.discountToman),
+      tax: 0,
+      charge: 0,
+      workerId: 0,
+      isCancel: false,
+    })),
+    paymentInformation: payments.map((payment) => ({
+      tenderId: payment.tenderId,
+      paymentAmount: payment.amountToman * 10,
+      discountedAmount: 0,
+      rrn: "",
+      stan: "",
+      cardNumber: "",
+      hashedCardNumber: "",
+      customerIdentifier: "",
+      terminalCode: "",
+      serialNumber: payment.serialNumber,
+      giftCardPassword: "",
+    })),
+  };
 }
 
-function findKiyanDocumentBarcode(
-  order: SalesOrder,
-  type: "return" | "exchange" | "primary"
-) {
-  const document = order.kiyanDocuments?.find((item) => item.type === type);
+function validateKiyanSaleWorkflow({
+  order,
+  uniqueInfo,
+  customerId,
+  saleItems,
+  payments,
+}: {
+  order?: SalesOrder;
+  uniqueInfo: string;
+  customerId: string;
+  saleItems: KiyanSaleItemDraft[];
+  payments: KiyanPaymentDraft[];
+}) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
 
-  return document?.barcode;
+  if (!order) {
+    errors.push("سفارش پیدا نشد.");
+  }
+
+  if (!customerId.trim()) {
+    errors.push("Customer ID کیان الزامی است.");
+  }
+
+  if (!uniqueInfo.trim()) {
+    errors.push("Unique Info الزامی است.");
+  }
+
+  if (!saleItems.length) {
+    errors.push("حداقل یک آیتم فروش باید وجود داشته باشد.");
+  }
+
+  saleItems.forEach((item) => {
+    if (!item.kiyanItemId || Number(item.kiyanItemId) <= 0) {
+      errors.push(`شناسه آیتم کیان برای ${item.title} معتبر نیست.`);
+    }
+
+    if (!item.variantBarcode) {
+      warnings.push(`برای ${item.title} barcode variant ثبت نشده است.`);
+    }
+
+    if (!item.parentProductCode) {
+      warnings.push(`برای ${item.title} کد پدر محصول ثبت نشده است.`);
+    }
+
+    if (item.priceToman <= 0) {
+      warnings.push(`قیمت واحد برای ${item.title} صفر است و باید کنترل شود.`);
+    }
+
+    if (item.discountToman > item.priceToman) {
+      errors.push(`تخفیف ${item.title} نمی‌تواند بیشتر از قیمت واحد باشد.`);
+    }
+  });
+
+  if (!payments.length) {
+    errors.push("حداقل یک پرداخت باید وجود داشته باشد.");
+  }
+
+  payments.forEach((payment) => {
+    if (payment.amountToman <= 0) {
+      errors.push(`مبلغ پرداخت ${payment.title} معتبر نیست.`);
+    }
+  });
+
+  const itemsTotal = getSaleItemsTotal(saleItems);
+  const paymentsTotal = getPaymentsTotal(payments);
+
+  if (itemsTotal > 0 && paymentsTotal !== itemsTotal) {
+    warnings.push(
+      `جمع پرداخت‌ها با جمع آیتم‌ها برابر نیست. اختلاف: ${(
+        paymentsTotal - itemsTotal
+      ).toLocaleString("fa-IR")} تومان`
+    );
+  }
+
+  if (order && order.kiyanInvoice.code) {
+    warnings.push("این سفارش از قبل فاکتور کیان دارد. ثبت مجدد را بررسی کن.");
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings,
+  };
 }
 
-function countTasks(
-  operationOrders: KiyanOperationOrder[],
-  type: KiyanTaskType
-) {
-  return operationOrders.reduce(
-    (total, item) =>
-      total + item.tasks.filter((task) => task.type === type).length,
+function getSaleItemsTotal(items: KiyanSaleItemDraft[]) {
+  return items.reduce(
+    (sum, item) =>
+      sum + Math.max(0, item.priceToman - item.discountToman) * item.quantity,
     0
   );
 }
 
-function getOperationPriorityScore(tasks: KiyanTask[]) {
-  return tasks.reduce((score, task) => {
-    if (task.type === "financial_review") return score + 60;
-    if (task.type === "primary_sale") return score + 50;
-    if (task.type === "exchange_document") return score + 40;
-    if (task.type === "return_document") return score + 35;
-    if (task.type === "snapp_sync") return score + 30;
-    if (task.type === "follow_up") return score + 20;
-
-    return score;
-  }, 0);
+function getPaymentsTotal(payments: KiyanPaymentDraft[]) {
+  return payments.reduce((sum, payment) => sum + payment.amountToman, 0);
 }
 
-function getTaskIcon(type: KiyanTaskType): LucideIcon {
-  if (type === "primary_sale") return ReceiptText;
-  if (type === "return_document") return RotateCcw;
-  if (type === "exchange_document") return Repeat2;
-  if (type === "snapp_sync") return Smartphone;
-  if (type === "financial_review") return FileWarning;
-
-  return AlertTriangle;
+function getDefaultCustomerId(order: SalesOrder) {
+  return order.customer.mobile.replace(/\D/g, "") || String(order.id);
 }
 
-function getSeverityClass(severity: KiyanTaskSeverity) {
-  if (severity === "rose") {
-    return "bg-rose-500/10 text-rose-700 dark:text-rose-300";
-  }
+function getDefaultKiyanItemId(value: string) {
+  const digits = value.replace(/\D/g, "");
 
-  if (severity === "amber") {
-    return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
-  }
+  if (!digits) return "";
 
-  if (severity === "violet") {
-    return "bg-violet-500/10 text-violet-700 dark:text-violet-300";
-  }
-
-  if (severity === "emerald") {
-    return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-  }
-
-  return "bg-sky-500/10 text-sky-700 dark:text-sky-300";
+  return digits.slice(-9);
 }
 
-function buildKiyanSearchText(order: SalesOrder, tasks: KiyanTask[]) {
+function getDefaultTenderId(order: SalesOrder): KiyanTenderId {
+  if (order.payment.gateway === "saman") return "621";
+  if (order.payment.gateway === "medisa") return "1247";
+  if (order.payment.gateway === "snapp_pay") return "1015";
+  if (order.payment.gateway === "wallet") return "399";
+
+  return "1";
+}
+
+function getDefaultTenderTitle(order: SalesOrder) {
+  const tenderId = getDefaultTenderId(order);
+
+  return TENDER_OPTIONS.find((item) => item.id === tenderId)?.title ?? "پرداخت";
+}
+
+function getWorkflowSteps({
+  hasItems,
+  hasPayments,
+  hasValidationError,
+  hasResponse,
+  isSubmitting,
+}: {
+  hasItems: boolean;
+  hasPayments: boolean;
+  hasValidationError: boolean;
+  hasResponse: boolean;
+  isSubmitting: boolean;
+}): OrderWorkflowStep[] {
   return [
-    order.id,
-    order.customer.fullName,
-    order.customer.mobile,
-    order.customer.city,
-    order.status,
-    order.payment.gateway,
-    order.kiyanInvoice.code,
-    order.returnInfo?.returnKiyanBarcode,
-    order.returnInfo?.reason,
-    order.exchangeInfo?.returnKiyanBarcode,
-    order.exchangeInfo?.replacementKiyanBarcode,
-    order.exchangeInfo?.replacementOrderNumber,
-    order.externalSync?.status,
-    ...tasks.flatMap((task) => [task.title, task.description, task.type]),
-    ...order.products.flatMap((product) => [
-      product.title,
-      product.productCode,
-      product.barcode,
-      product.color,
-      product.size,
-    ]),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+    {
+      id: "context",
+      title: "Context سفارش",
+      description: "مشتری و وضعیت کیان",
+      status: "done",
+    },
+    {
+      id: "items",
+      title: "آیتم‌های فروش",
+      description: "محصول، variant و itemId",
+      status: hasItems ? "done" : "current",
+    },
+    {
+      id: "payments",
+      title: "پرداخت‌ها",
+      description: "Tender و مبلغ",
+      status: hasPayments ? "done" : "todo",
+    },
+    {
+      id: "validation",
+      title: "کنترل نهایی",
+      description: "خطاها و هشدارها",
+      status: hasValidationError ? "warning" : hasItems && hasPayments ? "done" : "todo",
+    },
+    {
+      id: "submit",
+      title: "ثبت نتیجه",
+      description: "barcode فاکتور کیان",
+      status: hasResponse ? "done" : isSubmitting ? "current" : "todo",
+    },
+  ];
 }
 
-function formatDate(value?: string) {
-  if (!value) return "ثبت نشده";
+function getCurrentStepLabel(steps: OrderWorkflowStep[]) {
+  const current =
+    steps.find((step) => step.status === "current") ??
+    steps.find((step) => step.status === "warning") ??
+    steps.find((step) => step.status === "todo") ??
+    steps[steps.length - 1];
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString("fa-IR");
+  return current?.title ?? "در حال بررسی";
 }

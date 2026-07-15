@@ -293,7 +293,7 @@ export function PaymentShippingGrid({ order }: { order: SalesOrder }) {
   );
 }
 
-function PaymentPanel({ order }: { order: SalesOrder }) {
+export function PaymentPanel({ order }: { order: SalesOrder }) {
   const isSuccess = order.payment.statusCode === 100;
 
   return (
@@ -336,7 +336,7 @@ function PaymentPanel({ order }: { order: SalesOrder }) {
   );
 }
 
-function ShippingPanel({ order }: { order: SalesOrder }) {
+export function ShippingPanel({ order }: { order: SalesOrder }) {
   return (
     <section className={salesOrdersPanelClass}>
       <SectionHeader
