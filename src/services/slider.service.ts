@@ -1,6 +1,5 @@
 import type { Slide } from "@/types/slider";
 
-import { ENDPOINTS } from "@/lib/api/endpoints";
 import { httpClient } from "@/lib/api/http-client";
 import {
   type ApiEnvelope,
@@ -32,21 +31,23 @@ interface SlidesListResponse {
 
 export const sliderService = {
   async getSlides(params?: GetSlidesParams) {
-    const response = await httpClient.get<ApiEnvelope<SlidesListResponse>>(
-      ENDPOINTS.slider.list(params),
-      {
-        auth: true,
-      }
-    );
+    const response = await httpClient.endpoint<
+      ApiEnvelope<SlidesListResponse>
+    >("slider.list", {
+      query: params,
+    });
 
     return unwrapApiData(response, "دریافت لیست اسلایدرها با خطا مواجه شد.");
   },
 
   async getSlide(id: string | number) {
-    const response = await httpClient.get<ApiEnvelope<{ slide: Slide }>>(
-      ENDPOINTS.slider.detail(id),
+    const response = await httpClient.endpoint<ApiEnvelope<{ slide: Slide }>>(
+      "slider.detail",
       {
-        auth: true,
+        pathParams: {
+          id,
+          uuid: id,
+        },
       }
     );
 
@@ -55,44 +56,52 @@ export const sliderService = {
   },
 
   async createSlide(payload: CreateSlidePayload) {
-    const response = await httpClient.post<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ slide: Slide }>,
       CreateSlidePayload
-    >(ENDPOINTS.slider.create, payload, {
-      auth: true,
+    >("slider.create", {
+      body: payload,
     });
 
     return unwrapApiData(response, "ایجاد اسلاید با خطا مواجه شد.").slide;
   },
 
   async updateSlide(id: string | number, payload: UpdateSlidePayload) {
-    const response = await httpClient.patch<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ slide: Slide }>,
       UpdateSlidePayload
-    >(ENDPOINTS.slider.update(id), payload, {
-      auth: true,
+    >("slider.update", {
+      pathParams: {
+        id,
+        uuid: id,
+      },
+      body: payload,
     });
 
     return unwrapApiData(response, "ویرایش اسلاید با خطا مواجه شد.").slide;
   },
 
   async deleteSlide(id: string | number) {
-    const response = await httpClient.delete<ApiEnvelope<{ success: boolean }>>(
-      ENDPOINTS.slider.delete(id),
-      {
-        auth: true,
-      }
-    );
+    const response = await httpClient.endpoint<
+      ApiEnvelope<{ success: boolean }>
+    >("slider.delete", {
+      pathParams: {
+        id,
+        uuid: id,
+      },
+    });
 
     return unwrapApiData(response, "حذف اسلاید با خطا مواجه شد.");
   },
 
   async publishSlide(id: string | number) {
-    const response = await httpClient.post<ApiEnvelope<{ slide: Slide }>>(
-      ENDPOINTS.slider.publish(id),
-      undefined,
+    const response = await httpClient.endpoint<ApiEnvelope<{ slide: Slide }>>(
+      "slider.publish",
       {
-        auth: true,
+        pathParams: {
+          id,
+          uuid: id,
+        },
       }
     );
 
@@ -100,11 +109,13 @@ export const sliderService = {
   },
 
   async unpublishSlide(id: string | number) {
-    const response = await httpClient.post<ApiEnvelope<{ slide: Slide }>>(
-      ENDPOINTS.slider.unpublish(id),
-      undefined,
+    const response = await httpClient.endpoint<ApiEnvelope<{ slide: Slide }>>(
+      "slider.unpublish",
       {
-        auth: true,
+        pathParams: {
+          id,
+          uuid: id,
+        },
       }
     );
 
@@ -112,11 +123,13 @@ export const sliderService = {
   },
 
   async activateSlide(id: string | number) {
-    const response = await httpClient.post<ApiEnvelope<{ slide: Slide }>>(
-      ENDPOINTS.slider.activate(id),
-      undefined,
+    const response = await httpClient.endpoint<ApiEnvelope<{ slide: Slide }>>(
+      "slider.activate",
       {
-        auth: true,
+        pathParams: {
+          id,
+          uuid: id,
+        },
       }
     );
 
@@ -124,11 +137,13 @@ export const sliderService = {
   },
 
   async deactivateSlide(id: string | number) {
-    const response = await httpClient.post<ApiEnvelope<{ slide: Slide }>>(
-      ENDPOINTS.slider.deactivate(id),
-      undefined,
+    const response = await httpClient.endpoint<ApiEnvelope<{ slide: Slide }>>(
+      "slider.deactivate",
       {
-        auth: true,
+        pathParams: {
+          id,
+          uuid: id,
+        },
       }
     );
 
@@ -137,11 +152,11 @@ export const sliderService = {
   },
 
   async reorderSlides(payload: ReorderSlidesPayload) {
-    const response = await httpClient.post<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ slides: Slide[] }>,
       ReorderSlidesPayload
-    >(ENDPOINTS.slider.reorder, payload, {
-      auth: true,
+    >("slider.reorder", {
+      body: payload,
     });
 
     return unwrapApiData(response, "مرتب‌سازی اسلایدها با خطا مواجه شد.")
@@ -152,11 +167,11 @@ export const sliderService = {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await httpClient.post<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ url: string; alt?: string }>,
       FormData
-    >(ENDPOINTS.slider.uploadImage, formData, {
-      auth: true,
+    >("slider.uploadImage", {
+      body: formData,
     });
 
     return unwrapApiData(response, "آپلود تصویر با خطا مواجه شد.");

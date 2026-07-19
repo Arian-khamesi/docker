@@ -1,8 +1,20 @@
 import { env } from "@/lib/env";
 import { ApiError } from "@/lib/api/api-error";
+import {
+  getApiEndpointDefinition,
+  type ApiEndpointKey,
+} from "@/lib/api/endpoints/index";
+import {
+  buildQueryString,
+  resolvePathParams,
+} from "@/lib/api/endpoint-resolver";
+import type {
+  ApiBaseTarget,
+  PathParams,
+  QueryParams,
+} from "@/lib/api/endpoint.types";
 
-type QueryValue = string | number | boolean | null | undefined;
-type QueryParams = Record<string, QueryValue | QueryValue[]>;
+import { getResolvedEndpointDefinition } from "@/lib/api/remote-endpoint-registry";
 
 type ParseAs = "json" | "text" | "blob" | "void";
 
@@ -10,10 +22,18 @@ interface HttpRequestOptions<TBody = unknown>
   extends Omit<RequestInit, "body"> {
   body?: TBody;
   query?: QueryParams;
+  pathParams?: PathParams;
   token?: string | null;
   auth?: boolean;
+  base?: ApiBaseTarget;
   timeoutMs?: number;
   parseAs?: ParseAs;
+}
+
+interface EndpointRequestOptions<TBody = unknown>
+  extends Omit<HttpRequestOptions<TBody>, "method" | "base"> {
+  method?: never;
+  base?: never;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -31,22 +51,41 @@ export async function apiRequest<TResponse = unknown, TBody = unknown>(
   const {
     body,
     query,
+    pathParams,
     token,
     auth = false,
+    base = "v1",
     timeoutMs = DEFAULT_TIMEOUT_MS,
     parseAs = "json",
     headers,
     method = "GET",
+    signal,
     ...requestInit
   } = options;
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  const abortFromExternalSignal = () => controller.abort();
+
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", abortFromExternalSignal, {
+        once: true,
+      });
+    }
+  }
+
+  if (timeoutMs > 0) {
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+  }
 
   try {
     const finalToken = token ?? (auth ? tokenResolver?.() ?? null : null);
 
-    const response = await fetch(buildUrl(endpoint, query), {
+    const response = await fetch(buildUrl(endpoint, query, pathParams, base), {
       ...requestInit,
       method,
       headers: buildHeaders(headers, body, finalToken),
@@ -82,11 +121,57 @@ export async function apiRequest<TResponse = unknown, TBody = unknown>(
       payload: error,
     });
   } finally {
-    window.clearTimeout(timeout);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+
+    if (signal) {
+      signal.removeEventListener("abort", abortFromExternalSignal);
+    }
   }
 }
 
+export async function apiEndpointRequest<
+  TResponse = unknown,
+  TBody = unknown,
+>(
+  endpointKey: ApiEndpointKey,
+  options: EndpointRequestOptions<TBody> = {}
+): Promise<TResponse> {
+  const endpoint = getResolvedEndpointDefinition(endpointKey);
+
+  return apiRequest<TResponse, TBody>(endpoint.path, {
+    ...options,
+    method: endpoint.method,
+    auth: options.auth ?? endpoint.auth ?? false,
+    base: endpoint.base ?? "v1",
+  });
+}
+
+export async function apiRuntimeEndpointRequest<
+  TResponse = unknown,
+  TBody = unknown,
+>(
+  endpointKey: string,
+  options: EndpointRequestOptions<TBody> = {}
+): Promise<TResponse> {
+  const endpoint = getResolvedEndpointDefinition(endpointKey);
+
+  return apiRequest<TResponse, TBody>(endpoint.path, {
+    ...options,
+    method: endpoint.method,
+    auth: options.auth ?? endpoint.auth ?? false,
+    base: endpoint.base ?? "v1",
+  });
+}
+
 export const httpClient = {
+  request: apiRequest,
+
+  endpoint: apiEndpointRequest,
+
+  runtimeEndpoint: apiRuntimeEndpointRequest,
+
   get<TResponse = unknown>(
     endpoint: string,
     options?: Omit<HttpRequestOptions, "method" | "body">
@@ -144,45 +229,37 @@ export const httpClient = {
   },
 };
 
-function buildUrl(endpoint: string, query?: QueryParams) {
-  const baseUrl = env.apiBaseUrl;
+function buildUrl(
+  endpoint: string,
+  query?: QueryParams,
+  pathParams?: PathParams,
+  base: ApiBaseTarget = "v1"
+) {
+  const resolvedEndpoint = resolvePathParams(endpoint, pathParams);
 
   const isAbsolute =
-    endpoint.startsWith("http://") || endpoint.startsWith("https://");
+    resolvedEndpoint.startsWith("http://") ||
+    resolvedEndpoint.startsWith("https://");
 
   const url = isAbsolute
-    ? endpoint
-    : `${baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    ? resolvedEndpoint
+    : `${getBaseUrl(base)}${
+        resolvedEndpoint.startsWith("/")
+          ? resolvedEndpoint
+          : `/${resolvedEndpoint}`
+      }`;
 
-  const queryString = buildQueryString(query);
-
-  return `${url}${queryString}`;
+  return `${url}${buildQueryString(query)}`;
 }
 
-function buildQueryString(query?: QueryParams) {
-  if (!query) return "";
+function getBaseUrl(base: ApiBaseTarget) {
+  const apiV1BaseUrl = removeTrailingSlash(env.apiBaseUrl);
 
-  const searchParams = new URLSearchParams();
+  if (base === "v1") {
+    return apiV1BaseUrl;
+  }
 
-  Object.entries(query).forEach(([key, value]) => {
-    if (value === undefined || value === null) return;
-
-    if (Array.isArray(value)) {
-      value.forEach((item) => {
-        if (item !== undefined && item !== null) {
-          searchParams.append(key, String(item));
-        }
-      });
-
-      return;
-    }
-
-    searchParams.set(key, String(value));
-  });
-
-  const queryString = searchParams.toString();
-
-  return queryString ? `?${queryString}` : "";
+  return removeTrailingSlash(apiV1BaseUrl.replace(/\/api\/v1\/?$/, ""));
 }
 
 function buildHeaders(
@@ -220,12 +297,26 @@ function buildBody(body: unknown): BodyInit | undefined {
 function shouldSendJson(body: unknown) {
   if (!body) return false;
 
-  return !(
-    body instanceof FormData ||
-    body instanceof Blob ||
-    body instanceof ArrayBuffer ||
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    return false;
+  }
+
+  if (typeof Blob !== "undefined" && body instanceof Blob) {
+    return false;
+  }
+
+  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) {
+    return false;
+  }
+
+  if (
+    typeof URLSearchParams !== "undefined" &&
     body instanceof URLSearchParams
-  );
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 async function parseResponse<TResponse>(
@@ -305,4 +396,8 @@ function getFallbackErrorMessage(status: number) {
     default:
       return null;
   }
+}
+
+function removeTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
 }

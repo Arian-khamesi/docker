@@ -1,6 +1,5 @@
 import type { User } from "./auth.types";
 
-import { ENDPOINTS } from "@/lib/api/endpoints";
 import { ApiError } from "@/lib/api/api-error";
 import {
   type ApiEnvelope,
@@ -34,12 +33,14 @@ export async function login(
   username: string,
   password: string
 ): Promise<User> {
-  const response = await httpClient.post<
+  const response = await httpClient.endpoint<
     ApiEnvelope<LoginResponseData>,
     LoginCredentials
-  >(ENDPOINTS.auth.login, {
-    username,
-    password,
+  >("auth.login", {
+    body: {
+      username,
+      password,
+    },
   });
 
   const data = unwrapApiData(response, "ورود با خطا مواجه شد.");
@@ -70,14 +71,14 @@ export async function getSession(): Promise<User | null> {
   if (!token) return null;
 
   try {
-    const response = await httpClient.get<ApiEnvelope<SessionResponseData>>(
-      ENDPOINTS.auth.me,
-      {
-        auth: true,
-      }
+    const response = await httpClient.endpoint<ApiEnvelope<SessionResponseData>>(
+      "auth.me"
     );
 
-    const data = unwrapApiData(response, "دریافت اطلاعات کاربر با خطا مواجه شد.");
+    const data = unwrapApiData(
+      response,
+      "دریافت اطلاعات کاربر با خطا مواجه شد."
+    );
 
     if (!data.user) {
       clearAuthSession();
@@ -98,13 +99,7 @@ export async function logout() {
     const token = getToken();
 
     if (token) {
-      await httpClient.post<ApiEnvelope<unknown>>(
-        ENDPOINTS.auth.logout,
-        undefined,
-        {
-          auth: true,
-        }
-      );
+      await httpClient.endpoint<ApiEnvelope<unknown>>("auth.logout");
     }
   } finally {
     clearAuthSession();

@@ -1,6 +1,5 @@
 import type { MenuItem, MenuType } from "@/types/menu";
 
-import { ENDPOINTS } from "@/lib/api/endpoints";
 import { httpClient } from "@/lib/api/http-client";
 import {
   type ApiEnvelope,
@@ -34,10 +33,10 @@ export type UpdateMenuItemPayload = Partial<Omit<MenuItem, "id">>;
 
 export const menuService = {
   async getMenuTree(params?: GetMenuTreeParams) {
-    const response = await httpClient.get<ApiEnvelope<MenuTreeData>>(
-      ENDPOINTS.menu.tree(params),
+    const response = await httpClient.endpoint<ApiEnvelope<MenuTreeData>>(
+      "menu.tree",
       {
-        auth: true,
+        query: params,
       }
     );
 
@@ -45,55 +44,59 @@ export const menuService = {
   },
 
   async saveMenuStructure(payload: SaveMenuStructurePayload) {
-    const response = await httpClient.put<
+    const response = await httpClient.endpoint<
       ApiEnvelope<MenuTreeData>,
       SaveMenuStructurePayload
-    >(ENDPOINTS.menu.saveStructure, payload, {
-      auth: true,
+    >("menu.saveStructure", {
+      body: payload,
     });
 
     return unwrapApiData(response, "ذخیره ساختار منو با خطا مواجه شد.");
   },
 
   async createMenuItem(payload: CreateMenuItemPayload) {
-    const response = await httpClient.post<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ item: MenuItem }>,
       CreateMenuItemPayload
-    >(ENDPOINTS.menu.create, payload, {
-      auth: true,
+    >("menu.create", {
+      body: payload,
     });
 
     return unwrapApiData(response, "ایجاد آیتم منو با خطا مواجه شد.").item;
   },
 
   async updateMenuItem(id: string | number, payload: UpdateMenuItemPayload) {
-    const response = await httpClient.patch<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ item: MenuItem }>,
       UpdateMenuItemPayload
-    >(ENDPOINTS.menu.update(id), payload, {
-      auth: true,
+    >("menu.update", {
+      pathParams: {
+        id,
+      },
+      body: payload,
     });
 
     return unwrapApiData(response, "ویرایش آیتم منو با خطا مواجه شد.").item;
   },
 
   async deleteMenuItem(id: string | number) {
-    const response = await httpClient.delete<ApiEnvelope<{ success: boolean }>>(
-      ENDPOINTS.menu.delete(id),
-      {
-        auth: true,
-      }
-    );
+    const response = await httpClient.endpoint<
+      ApiEnvelope<{ success: boolean }>
+    >("menu.delete", {
+      pathParams: {
+        id,
+      },
+    });
 
     return unwrapApiData(response, "حذف آیتم منو با خطا مواجه شد.");
   },
 
   async reorderMenu(payload: ReorderMenuPayload) {
-    const response = await httpClient.post<
+    const response = await httpClient.endpoint<
       ApiEnvelope<MenuTreeData>,
       ReorderMenuPayload
-    >(ENDPOINTS.menu.reorder, payload, {
-      auth: true,
+    >("menu.reorder", {
+      body: payload,
     });
 
     return unwrapApiData(response, "مرتب‌سازی منو با خطا مواجه شد.");
@@ -103,11 +106,11 @@ export const menuService = {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await httpClient.post<
+    const response = await httpClient.endpoint<
       ApiEnvelope<{ url: string }>,
       FormData
-    >(ENDPOINTS.menu.uploadImage, formData, {
-      auth: true,
+    >("menu.uploadImage", {
+      body: formData,
     });
 
     return unwrapApiData(response, "آپلود تصویر منو با خطا مواجه شد.");
